@@ -170,7 +170,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Detect faces and crop to head+shoulders.")
     parser.add_argument("input_dir", nargs="?", default="input", help="Input directory (default: input)")
-    parser.add_argument("output_dir", nargs="?", default="cropped", help="Output directory (default: cropped)")
+    parser.add_argument("output_dir", nargs="?", default="output/cropped", help="Output directory (default: output/cropped)")
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)

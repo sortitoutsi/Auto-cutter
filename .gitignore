@@ -1,9 +1,23 @@
-.claude/
+# Python virtual environments
 .venv/
-ab_testing/
-cropped/
-input/
-output_transparent/
 venv_bg/
-.DS_STORE
 
+# Generated outputs (all stages)
+output/
+input/
+cropped/
+output_transparent/
+
+# A/B testing artefacts
+ab_testing/
+
+# ML model weights (downloaded on first run)
+face_landmarker.task
+face_detector.tflite
+shape_predictor_68_face_landmarks.dat
+
+# Claude Code settings
+.claude/
+
+# macOS
+.DS_Store

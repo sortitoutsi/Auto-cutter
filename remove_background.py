@@ -295,7 +295,7 @@ def process_image(
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--input", default="cropped", help="Input directory (default: cropped)")
-    p.add_argument("--output", default="output_transparent", help="Output directory (default: output_transparent)")
+    p.add_argument("--output", default="output/transparent", help="Output directory (default: output/transparent)")
     p.add_argument("--device", default="auto", choices=["auto", "mps", "cuda", "cpu"])
     p.add_argument("--no-tta", action="store_true", help="Disable horizontal-flip test-time augmentation")
     p.add_argument("--no-ensemble", action="store_true", help="Use only BiRefNet_HR-matting (skip salient model)")

@@ -37,7 +37,7 @@ TMP_ALIGNED="$TMP_DIR/aligned"
 TMP_CROPPED="$TMP_DIR/cropped"
 TMP_TRANSPARENT="$TMP_DIR/transparent"
 TMP_PORTRAIT="$TMP_DIR/portrait"
-OUTPUT_DIR="$SCRIPT_DIR/output-final"
+OUTPUT_DIR="$SCRIPT_DIR/output/final"
 
 cleanup() {
     echo ""
@@ -96,12 +96,12 @@ fi
 # --- step 2: align eyes ---
 echo ""
 echo "=== Step 2/6: Aligning eyes ==="
-"$PYTHON" "$SCRIPT_DIR/align_eyes.py" "$INPUT_DIR" "$TMP_ALIGNED"
+"$PYTHON" "$SCRIPT_DIR/align.py" "$INPUT_DIR" "$TMP_ALIGNED"
 
 # --- step 3: crop faces ---
 echo ""
 echo "=== Step 3/6: Cropping faces ==="
-"$PYTHON" "$SCRIPT_DIR/crop_faces.py" "$TMP_ALIGNED" "$TMP_CROPPED"
+"$PYTHON" "$SCRIPT_DIR/crop_source.py" "$TMP_ALIGNED" "$TMP_CROPPED"
 
 # --- step 4: remove background ---
 echo ""
@@ -113,7 +113,7 @@ echo "=== Step 4/6: Removing backgrounds ==="
 # --- step 5: crop portrait ---
 echo ""
 echo "=== Step 5/6: Cropping to portrait (250×250) ==="
-"$PYTHON" "$SCRIPT_DIR/crop_portrait.py" "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
+"$PYTHON" "$SCRIPT_DIR/crop_cutout.py" "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
 
 # --- step 6: deglow ---
 echo ""

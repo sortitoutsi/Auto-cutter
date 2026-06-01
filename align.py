@@ -342,7 +342,7 @@ def process_image(input_path: Path, output_path: Path, debug_dir: Path | None = 
 def main():
     parser = argparse.ArgumentParser(description="Align images so eyes are level.")
     parser.add_argument("input_dir", nargs="?", default="input", help="Input directory (default: input)")
-    parser.add_argument("output_dir", nargs="?", default="output_aligned", help="Output directory (default: output_aligned)")
+    parser.add_argument("output_dir", nargs="?", default="output/aligned", help="Output directory (default: output/aligned)")
     parser.add_argument("--debug", action="store_true", help="Save debug overlay images to <output_dir>/debug/")
     args = parser.parse_args()
 
