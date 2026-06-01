@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "pip_requirements": {
+    "fileMatch": ["requirements.*\\.txt$"]
+  },
+  "packageRules": [
+    {
+      "matchPackageNames": ["torch", "torchvision"],
+      "groupName": "pytorch",
+      "schedule": ["on the first day of the month"]
+    },
+    {
+      "matchPackageNames": ["transformers", "timm", "einops", "huggingface_hub", "kornia"],
+      "groupName": "ml-stack",
+      "schedule": ["on the first day of the month"]
+    }
+  ]
+}

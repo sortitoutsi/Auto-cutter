@@ -5,6 +5,7 @@ venv_bg/
 # Generated outputs (all stages)
 output/
 input/
+tmp_pipeline/
 cropped/
 output_transparent/
 

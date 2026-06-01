@@ -1,0 +1,18 @@
+{
+  "portrait_centered_dark.png": {
+    "fg_coverage_pct": 56.725,
+    "fringe_density_pct": 7.28,
+    "mean_fringe_brightness": 69.232,
+    "alpha_edge_sharpness": 46.801,
+    "h_center_of_mass": 0.4992,
+    "v_center_of_mass": 0.5742
+  },
+  "portrait_offset_light.png": {
+    "fg_coverage_pct": 59.97,
+    "fringe_density_pct": 9.842,
+    "mean_fringe_brightness": 178.871,
+    "alpha_edge_sharpness": 39.467,
+    "h_center_of_mass": 0.5222,
+    "v_center_of_mass": 0.567
+  }
+}

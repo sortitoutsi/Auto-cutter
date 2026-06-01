@@ -86,7 +86,7 @@ if [[ $SKIP_DOWNLOAD -eq 0 ]]; then
         echo "Export it before running: SITSI_COOKIE='...' ./pipeline.sh" >&2
         exit 1
     fi
-    "$PYTHON" "$SCRIPT_DIR/download_queue.py"
+    "$PYTHON" "$SCRIPT_DIR/scripts/download_queue.py"
     INPUT_DIR="$SCRIPT_DIR/input"
 else
     echo ""
@@ -96,29 +96,29 @@ fi
 # --- step 2: align eyes ---
 echo ""
 echo "=== Step 2/6: Aligning eyes ==="
-"$PYTHON" "$SCRIPT_DIR/align.py" "$INPUT_DIR" "$TMP_ALIGNED"
+"$PYTHON" "$SCRIPT_DIR/scripts/align.py" "$INPUT_DIR" "$TMP_ALIGNED"
 
 # --- step 3: crop faces ---
 echo ""
 echo "=== Step 3/6: Cropping faces ==="
-"$PYTHON" "$SCRIPT_DIR/crop_source.py" "$TMP_ALIGNED" "$TMP_CROPPED"
+"$PYTHON" "$SCRIPT_DIR/scripts/crop_source.py" "$TMP_ALIGNED" "$TMP_CROPPED"
 
 # --- step 4: remove background ---
 echo ""
 echo "=== Step 4/6: Removing backgrounds ==="
-"$PYTHON" "$SCRIPT_DIR/remove_background.py" \
+"$PYTHON" "$SCRIPT_DIR/scripts/remove_background.py" \
     --input "$TMP_CROPPED" \
     --output "$TMP_TRANSPARENT"
 
 # --- step 5: crop portrait ---
 echo ""
 echo "=== Step 5/6: Cropping to portrait (250×250) ==="
-"$PYTHON" "$SCRIPT_DIR/crop_cutout.py" "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
+"$PYTHON" "$SCRIPT_DIR/scripts/crop_cutout.py" "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
 
 # --- step 6: deglow ---
 echo ""
 echo "=== Step 6/6: Removing glow/halo ==="
-"$PYTHON" "$SCRIPT_DIR/deglow.py" "$TMP_PORTRAIT" "$OUTPUT_DIR" --overwrite
+"$PYTHON" "$SCRIPT_DIR/scripts/deglow.py" "$TMP_PORTRAIT" "$OUTPUT_DIR" --overwrite
 
 echo ""
 echo "=== Pipeline complete ==="

@@ -1,0 +1,12 @@
+# Lightweight deps for CI — no torch/transformers/mediapipe.
+# Used by .github/workflows/ci.yml
+
+numpy>=1.26
+Pillow>=10.0.0
+scipy>=1.11
+
+ruff>=0.4.0
+mypy>=1.10.0
+types-requests>=2.31.0
+types-Pillow>=10.0.0
+types-beautifulsoup4>=4.12.0
