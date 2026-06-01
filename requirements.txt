@@ -1,0 +1,27 @@
+# Requires Python 3.13 — PyTorch has no wheels for 3.14 yet.
+# The pipeline creates and destroys a venv automatically.
+
+# Face detection / alignment
+mediapipe>=0.10.0
+# dlib source builds fail on macOS 26 (fp.h missing from SDK include path);
+# dlib-bin provides identical prebuilt wheels.
+dlib-bin>=20.0.1
+opencv-python>=4.8.0
+
+# Background removal (heavy ML stack)
+torch>=2.5
+torchvision>=0.20
+transformers>=4.45
+timm>=1.0
+einops>=0.8
+huggingface_hub>=0.25
+kornia>=0.7
+
+# Image processing
+Pillow>=10.0.0
+numpy>=1.26
+scipy>=1.11
+
+# Download queue
+requests>=2.31
+beautifulsoup4>=4.12

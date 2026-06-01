@@ -1,0 +1,9 @@
+.claude/
+.venv/
+ab_testing/
+cropped/
+input/
+output_transparent/
+venv_bg/
+.DS_STORE
+

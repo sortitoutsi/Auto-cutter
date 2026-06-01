@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BG Removal Rater</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f13;
+    --surface: #1a1a22;
+    --surface2: #24242f;
+    --border: #2e2e3a;
+    --accent: #7c6af7;
+    --accent-hover: #9c8fff;
+    --text: #e8e8f0;
+    --text-muted: #7a7a90;
+    --star-off: #2e2e3a;
+    --star-on: #f5c518;
+    --good: #4ade80;
+    --radius: 10px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .5px; }
+  #progress-info { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+  #filename { color: var(--accent); font-weight: 500; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .progress-bar-wrap { flex: 1; min-width: 120px; max-width: 240px; height: 4px; background: var(--border); border-radius: 2px; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width .3s; }
+
+  /* ── Variant tabs ────────────────────────────────────────── */
+  .tabs-wrap {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 10px 16px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color .15s, border-color .15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab .tab-rating { margin-left: 6px; font-size: 11px; color: var(--star-on); }
+
+  /* ── Main panels ─────────────────────────────────────────── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    padding: 20px 24px;
+    min-height: 0;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .panel-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .panel-frame {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    min-height: 280px;
+    max-height: 480px;
+    position: relative;
+  }
+  .panel-frame.white-bg { background: #ffffff; }
+  .panel-frame.dark-bg  { background: #111118; }
+  .panel-frame.source-bg {
+    background:
+      repeating-conic-gradient(#c8c8c8 0% 25%, #f0f0f0 0% 50%)
+      0 0 / 20px 20px;
+  }
+  .panel-frame img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  .panel-frame .no-result {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+    padding: 16px;
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Bottom bar ──────────────────────────────────────────── */
+  footer {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .rating-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .rating-label { color: var(--text-muted); font-size: 13px; }
+  .stars { display: flex; gap: 6px; }
+  .star {
+    font-size: 28px;
+    cursor: pointer;
+    color: var(--star-off);
+    transition: color .1s, transform .1s;
+    user-select: none;
+    line-height: 1;
+  }
+  .star:hover, .star.on { color: var(--star-on); }
+  .star:hover { transform: scale(1.2); }
+  .rating-saved {
+    font-size: 12px;
+    color: var(--good);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .rating-saved.show { opacity: 1; }
+
+  .nav-row { display: flex; gap: 10px; align-items: center; }
+  .btn {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background .15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--border); }
+  .btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── Summary overlay ─────────────────────────────────────── */
+  .summary-btn {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    transition: color .15s, border-color .15s;
+  }
+  .summary-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  .overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .overlay-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    min-width: 340px;
+    max-width: 520px;
+    width: 90%;
+  }
+  .overlay-box h2 { font-size: 15px; margin-bottom: 18px; }
+  .summary-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .summary-table th { text-align: left; padding: 6px 10px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+  .summary-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .summary-table tr:last-child td { border-bottom: none; }
+  .bar-wrap { height: 6px; background: var(--border); border-radius: 3px; width: 100px; display: inline-block; vertical-align: middle; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .close-btn { margin-top: 20px; }
+
+  @media (max-width: 700px) {
+    main { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <h1>BG Removal Rater</h1>
+  <span id="filename">—</span>
+  <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
+  <span id="progress-info">— / —</span>
+</header>
+
+<!-- Variant tabs -->
+<div class="tabs-wrap" id="tabs"></div>
+
+<!-- Image panels -->
+<main>
+  <div class="panel">
+    <div class="panel-label">Source</div>
+    <div class="panel-frame source-bg" id="frame-source">
+      <div class="spinner"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-label">White background</div>
+    <div class="panel-frame white-bg" id="frame-white">
+      <div class="spinner"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-label">Dark background</div>
+    <div class="panel-frame dark-bg" id="frame-dark">
+      <div class="spinner"></div>
+    </div>
+  </div>
+</main>
+
+<!-- Footer -->
+<footer>
+  <div class="rating-row">
+    <span class="rating-label">Rating</span>
+    <div class="stars" id="stars">
+      <span class="star" data-v="1">★</span>
+      <span class="star" data-v="2">★</span>
+      <span class="star" data-v="3">★</span>
+      <span class="star" data-v="4">★</span>
+      <span class="star" data-v="5">★</span>
+    </div>
+    <span class="rating-saved" id="rating-saved">Saved ✓</span>
+  </div>
+
+  <div class="nav-row">
+    <button class="summary-btn" onclick="openSummary()">View summary</button>
+    <button class="btn btn-ghost" id="btn-prev" onclick="navigate(-1)">← Prev</button>
+    <button class="btn btn-primary" id="btn-next" onclick="navigate(1)">Next →</button>
+  </div>
+</footer>
+
+<!-- Summary overlay -->
+<div class="overlay" id="overlay" onclick="closeSummary(event)">
+  <div class="overlay-box">
+    <h2>Ratings Summary</h2>
+    <table class="summary-table">
+      <thead><tr><th>Variant</th><th>Rated</th><th>Avg</th><th></th></tr></thead>
+      <tbody id="summary-body"></tbody>
+    </table>
+    <button class="btn btn-ghost close-btn" onclick="closeSummary()">Close</button>
+  </div>
+</div>
+
+<script>
+  let images = [];
+  let variants = [];
+  let ratings = {};
+  let currentIdx = 0;
+  let currentVariant = '';
+
+  async function init() {
+    [images, variants, ratings] = await Promise.all([
+      fetch('/api/images').then(r => r.json()),
+      fetch('/api/variants').then(r => r.json()),
+      fetch('/api/ratings').then(r => r.json()),
+    ]);
+
+    if (!variants.length) {
+      document.querySelector('main').innerHTML =
+        '<p style="grid-column:1/-1;color:var(--text-muted);padding:40px">No processed results found. Run the A/B scripts first.</p>';
+      return;
+    }
+
+    currentVariant = variants[0];
+    buildTabs();
+    loadImage(0);
+  }
+
+  function buildTabs() {
+    const wrap = document.getElementById('tabs');
+    wrap.innerHTML = '';
+    variants.forEach(v => {
+      const btn = document.createElement('button');
+      btn.className = 'tab' + (v === currentVariant ? ' active' : '');
+      btn.dataset.variant = v;
+      btn.textContent = v.replace(/_/g, ' ');
+      const saved = getRating(images[currentIdx], v);
+      if (saved) btn.innerHTML += `<span class="tab-rating">${'★'.repeat(saved)}</span>`;
+      btn.onclick = () => switchVariant(v);
+      wrap.appendChild(btn);
+    });
+  }
+
+  function getRating(image, variant) {
+    const key = `${image}::${variant}`;
+    return ratings[key]?.rating || 0;
+  }
+
+  function loadImage(idx) {
+    currentIdx = idx;
+    const name = images[idx];
+
+    document.getElementById('filename').textContent = name;
+    document.getElementById('progress-info').textContent = `${idx + 1} / ${images.length}`;
+    document.getElementById('progress-bar').style.width = `${(idx + 1) / images.length * 100}%`;
+    document.getElementById('btn-prev').disabled = idx === 0;
+    document.getElementById('btn-next').disabled = idx === images.length - 1;
+
+    // Source
+    setFrame('frame-source', `/api/source/${encodeURIComponent(name)}`);
+    // Result panels
+    loadResultPanels(name, currentVariant);
+    // Stars
+    refreshStars();
+    // Refresh tab badges
+    buildTabs();
+  }
+
+  function loadResultPanels(name, variant) {
+    const url = `/api/result/${variant}/${encodeURIComponent(name)}`;
+    setFrame('frame-white', url);
+    setFrame('frame-dark', url);
+  }
+
+  function setFrame(id, url) {
+    const frame = document.getElementById(id);
+    frame.innerHTML = '<div class="spinner"></div>';
+    const img = new Image();
+    img.onload = () => { frame.innerHTML = ''; frame.appendChild(img); };
+    img.onerror = () => { frame.innerHTML = '<div class="no-result">No result yet</div>'; };
+    img.src = url + '?t=' + Date.now();
+  }
+
+  function switchVariant(v) {
+    currentVariant = v;
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.variant === v);
+    });
+    loadResultPanels(images[currentIdx], v);
+    refreshStars();
+  }
+
+  function refreshStars() {
+    const saved = getRating(images[currentIdx], currentVariant);
+    document.querySelectorAll('.star').forEach(s => {
+      s.classList.toggle('on', parseInt(s.dataset.v) <= saved);
+    });
+    document.getElementById('rating-saved').classList.remove('show');
+  }
+
+  // Star hover + click
+  const starsEl = document.getElementById('stars');
+  starsEl.addEventListener('mouseover', e => {
+    const v = parseInt(e.target.dataset?.v);
+    if (!v) return;
+    document.querySelectorAll('.star').forEach(s => {
+      s.classList.toggle('on', parseInt(s.dataset.v) <= v);
+    });
+  });
+  starsEl.addEventListener('mouseleave', refreshStars);
+  starsEl.addEventListener('click', async e => {
+    const v = parseInt(e.target.dataset?.v);
+    if (!v) return;
+    const image = images[currentIdx];
+    const variant = currentVariant;
+    const key = `${image}::${variant}`;
+    ratings[key] = { image, variant, rating: v, timestamp: new Date().toISOString() };
+    await fetch('/api/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image, variant, rating: v }),
+    });
+    refreshStars();
+    buildTabs();
+    const saved = document.getElementById('rating-saved');
+    saved.classList.add('show');
+    setTimeout(() => saved.classList.remove('show'), 1500);
+  });
+
+  function navigate(dir) {
+    const next = currentIdx + dir;
+    if (next >= 0 && next < images.length) loadImage(next);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') navigate(1);
+    if (e.key === 'ArrowLeft') navigate(-1);
+    if (e.key >= '1' && e.key <= '5') {
+      document.querySelector(`.star[data-v="${e.key}"]`)?.click();
+    }
+    const vIdx = ['q','w','e','r','t'].indexOf(e.key);
+    if (vIdx !== -1 && variants[vIdx]) switchVariant(variants[vIdx]);
+  });
+
+  async function openSummary() {
+    const summary = await fetch('/api/summary').then(r => r.json());
+    const tbody = document.getElementById('summary-body');
+    tbody.innerHTML = '';
+    const maxAvg = Math.max(...Object.values(summary).map(s => s.avg), 1);
+    variants.forEach(v => {
+      const s = summary[v];
+      const tr = document.createElement('tr');
+      tr.innerHTML = s
+        ? `<td>${v.replace(/_/g, ' ')}</td>
+           <td>${s.count}</td>
+           <td>${s.avg} ★</td>
+           <td><span class="bar-wrap"><span class="bar-fill" style="width:${s.avg / 5 * 100}%"></span></span></td>`
+        : `<td>${v.replace(/_/g, ' ')}</td><td colspan="3" style="color:var(--text-muted)">No ratings yet</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('overlay').classList.add('open');
+  }
+
+  function closeSummary(e) {
+    if (!e || e.target === document.getElementById('overlay') || !e.target.closest('.overlay-box')) {
+      document.getElementById('overlay').classList.remove('open');
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
