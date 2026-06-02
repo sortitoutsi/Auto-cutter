@@ -1,8 +1,8 @@
 """Tests for pure-math helpers in `pipeline.crop_cutout`."""
+
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from image_cropper.pipeline.crop_cutout import (
@@ -12,10 +12,10 @@ from image_cropper.pipeline.crop_cutout import (
     find_hair_top,
 )
 
-
 # ---------------------------------------------------------------------------
 # find_hair_top
 # ---------------------------------------------------------------------------
+
 
 def test_find_hair_top_returns_none_for_rgb() -> None:
     img = Image.new("RGB", (32, 32))
@@ -52,6 +52,7 @@ def test_find_hair_top_returns_topmost() -> None:
 # ---------------------------------------------------------------------------
 # compute_crop
 # ---------------------------------------------------------------------------
+
 
 def _geo(**overrides: float) -> dict:
     base = {

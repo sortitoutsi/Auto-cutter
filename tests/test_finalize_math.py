@@ -4,6 +4,7 @@ The function writes a 250x250 RGBA PNG centred on a non-transparent
 bounding box. We don't have a pure-math extracted helper, so we test
 via the file API on tiny synthetic inputs.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

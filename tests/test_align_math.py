@@ -4,18 +4,17 @@ Only `compute_rotation_angle` and `_centroid` are exercised — they have
 no ML dependencies and can be imported without triggering mediapipe /
 dlib model loads (the heavy imports live inside the detector functions).
 """
-from __future__ import annotations
 
-import math
+from __future__ import annotations
 
 import pytest
 
 from image_cropper.pipeline.align import _centroid, compute_rotation_angle
 
-
 # ---------------------------------------------------------------------------
 # compute_rotation_angle
 # ---------------------------------------------------------------------------
+
 
 def test_horizontal_eyes_zero_angle() -> None:
     angle = compute_rotation_angle(left_eye=(100.0, 200.0), right_eye=(300.0, 200.0))
@@ -63,6 +62,7 @@ def test_compute_rotation_angle_bounded() -> None:
 # ---------------------------------------------------------------------------
 # _centroid
 # ---------------------------------------------------------------------------
+
 
 def test_centroid_single_point() -> None:
     assert _centroid([(10.0, 20.0)]) == (10.0, 20.0)

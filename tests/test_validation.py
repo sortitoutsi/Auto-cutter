@@ -1,4 +1,5 @@
 """Tests for boundary validators."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,6 +24,7 @@ SUPPORTED = {".jpg", ".png"}
 # ---------------------------------------------------------------------------
 # validate_input_path
 # ---------------------------------------------------------------------------
+
 
 def test_validate_input_path_accepts_existing_file(tmp_path: Path) -> None:
     f = tmp_path / "img.png"
@@ -55,6 +57,7 @@ def test_validate_input_path_rejects_non_path() -> None:
 # validate_output_path
 # ---------------------------------------------------------------------------
 
+
 def test_validate_output_path_creates_parent(tmp_path: Path) -> None:
     out = tmp_path / "deep" / "nested" / "result.png"
     assert validate_output_path(out) == out
@@ -76,6 +79,7 @@ def test_validate_output_path_rejects_non_path() -> None:
 # ensure_rgba
 # ---------------------------------------------------------------------------
 
+
 def test_ensure_rgba_passes_through_rgba() -> None:
     img = Image.new("RGBA", (4, 4))
     assert ensure_rgba(img) is img
@@ -95,6 +99,7 @@ def test_ensure_rgba_rejects_non_image() -> None:
 # ---------------------------------------------------------------------------
 # validate_image_array
 # ---------------------------------------------------------------------------
+
 
 def test_validate_image_array_happy_path() -> None:
     arr = np.zeros((10, 20, 3), dtype=np.uint8)
@@ -124,6 +129,7 @@ def test_validate_image_array_rejects_non_array() -> None:
 # ---------------------------------------------------------------------------
 # validate_crop_box
 # ---------------------------------------------------------------------------
+
 
 def test_validate_crop_box_happy_path() -> None:
     validate_crop_box(CropBox(10, 10, 90, 90), 100, 100)

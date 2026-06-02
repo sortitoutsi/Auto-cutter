@@ -1,4 +1,5 @@
 """Sanity checks on the exception hierarchy."""
+
 from __future__ import annotations
 
 import pytest

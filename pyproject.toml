@@ -194,7 +194,9 @@ no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.download_queue"
-ignore_errors = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
 
 # gui.py stays lax because PySide6's type stubs are incomplete and noisy.
 [[tool.mypy.overrides]]

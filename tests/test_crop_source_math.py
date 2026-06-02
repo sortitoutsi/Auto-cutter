@@ -1,4 +1,5 @@
 """Tests for `pipeline.crop_source.compute_crop_box`."""
+
 from __future__ import annotations
 
 import pytest
@@ -44,11 +45,11 @@ def test_crop_box_does_not_exceed_image_for_small_image() -> None:
     assert right <= 300 and bottom <= 300
 
 
-@pytest.mark.parametrize(
-    "face_x, face_y", [(0, 0), (1000, 0), (0, 1500), (1000, 1500)]
-)
+@pytest.mark.parametrize("face_x, face_y", [(0, 0), (1000, 0), (0, 1500), (1000, 1500)])
 def test_crop_box_stays_within_image_for_corner_faces(face_x: int, face_y: int) -> None:
-    box = compute_crop_box(face_x=face_x, face_y=face_y, face_w=200, face_h=300, img_w=1200, img_h=1600)
+    box = compute_crop_box(
+        face_x=face_x, face_y=face_y, face_w=200, face_h=300, img_w=1200, img_h=1600
+    )
     left, top, right, bottom = box
     assert 0 <= left < right <= 1200
     assert 0 <= top < bottom <= 1600

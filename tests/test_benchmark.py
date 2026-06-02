@@ -5,6 +5,7 @@ by CI) and the committed `benchmarks/baseline.json` to verify the
 metric extractor produces the same numbers it always has — this is a
 zero-cost regression test on the benchmark machinery itself.
 """
+
 from __future__ import annotations
 
 import json

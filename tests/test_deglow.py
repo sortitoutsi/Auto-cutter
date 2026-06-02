@@ -3,6 +3,7 @@
 Guarded behind `pytest.importorskip("scipy")` so the suite stays green
 on environments without the scientific stack.
 """
+
 from __future__ import annotations
 
 import numpy as np

@@ -1,4 +1,5 @@
 """Unit tests for typed value objects."""
+
 from __future__ import annotations
 
 import dataclasses

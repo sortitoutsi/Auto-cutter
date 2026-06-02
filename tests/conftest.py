@@ -4,6 +4,7 @@ Fixtures here are kept import-cheap: nothing imports torch / mediapipe /
 dlib, so the whole suite runs under the lightweight `requirements-ci.txt`
 environment.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
