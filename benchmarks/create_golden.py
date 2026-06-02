@@ -13,18 +13,15 @@ Usage:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+from image_cropper.pipeline.benchmark import compute_metrics
+
 GOLDEN_DIR = Path(__file__).parent / "golden"
 BASELINE_PATH = Path(__file__).parent / "baseline.json"
-
-# Make sure benchmark.py can be imported from the scripts/ sibling
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from benchmark import compute_metrics  # noqa: E402
 
 
 def _make_portrait(

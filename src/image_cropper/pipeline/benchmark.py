@@ -15,6 +15,7 @@ Usage:
   # promote current results as the new baseline
   python scripts/benchmark.py output/final/ --update-baseline benchmarks/baseline.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,29 +26,45 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from image_cropper.errors import ImageCropperError, ValidationError
+from image_cropper.types import MetricsDict
+
 SUPPORTED = {".png", ".webp"}
 DEFAULT_BASELINE = Path(__file__).parent.parent / "benchmarks" / "baseline.json"
 
+# Keys every entry in a baseline JSON must declare. Kept in sync with MetricsDict.
+_METRIC_KEYS: frozenset[str] = frozenset(
+    {
+        "fg_coverage_pct",
+        "fringe_density_pct",
+        "mean_fringe_brightness",
+        "alpha_edge_sharpness",
+        "h_center_of_mass",
+        "v_center_of_mass",
+    }
+)
+
 # Alpha thresholds — must stay in sync with deglow.py constants
-_ALPHA_FG: int = 127        # pixel counts as foreground
-_FRINGE_MIN: int = 5        # ignore near-invisible dust below this
-_FRINGE_MAX: int = 219      # pixel is fringe if alpha < this (mirrors deglow OPAQUE_MIN-1)
+_ALPHA_FG: int = 127  # pixel counts as foreground
+_FRINGE_MIN: int = 5  # ignore near-invisible dust below this
+_FRINGE_MAX: int = 219  # pixel is fringe if alpha < this (mirrors deglow OPAQUE_MIN-1)
 
 # Maximum allowed absolute delta from baseline before the check fails.
 # Tuned so small algorithm tweaks pass but real regressions do not.
 TOLERANCES: dict[str, float] = {
-    "fg_coverage_pct": 2.0,       # ± 2 pp foreground area
-    "fringe_density_pct": 1.5,    # ± 1.5 pp fringe pixels
+    "fg_coverage_pct": 2.0,  # ± 2 pp foreground area
+    "fringe_density_pct": 1.5,  # ± 1.5 pp fringe pixels
     "mean_fringe_brightness": 10.0,  # ± 10/255 luminance
     "alpha_edge_sharpness": 8.0,  # ± 8 RMS gradient units
-    "h_center_of_mass": 0.05,     # ± 5 % of canvas width off-center
-    "v_center_of_mass": 0.05,     # ± 5 % of canvas height off-center
+    "h_center_of_mass": 0.05,  # ± 5 % of canvas width off-center
+    "v_center_of_mass": 0.05,  # ± 5 % of canvas height off-center
 }
 
 
 # ---------------------------------------------------------------------------
 # Metric computation
 # ---------------------------------------------------------------------------
+
 
 def _luminance(rgb: np.ndarray) -> np.ndarray:
     """BT.601 luminance, input shape (..., 3) in 0-255, output in 0-255."""
@@ -61,8 +78,9 @@ def compute_metrics(img_path: Path) -> dict[str, float]:
         img = img.convert("RGBA")
 
     arr = np.array(img, dtype=np.float32)
-    rgb = arr[:, :, :3]       # (H, W, 3)
-    alpha = arr[:, :, 3]      # (H, W)
+    rgb = arr[:, :, :3]  # (H, W, 3)
+    alpha = arr[:, :, 3]  # (H, W)
+    assert (alpha >= 0).all() and (alpha <= 255).all(), "alpha out of [0,255]"
 
     H, W = alpha.shape
     total = H * W
@@ -113,6 +131,7 @@ def compute_metrics(img_path: Path) -> dict[str, float]:
 # Reporting
 # ---------------------------------------------------------------------------
 
+
 def _delta_str(value: float, base: float, tolerance: float) -> str:
     delta = value - base
     sign = "+" if delta >= 0 else ""
@@ -129,6 +148,45 @@ def print_results(results: dict[str, dict], baseline: dict[str, dict] | None) ->
             if k in base:
                 annotation = _delta_str(v, base[k], TOLERANCES.get(k, 1.0))
             print(f"    {k:<30} {v:>10.3f}{annotation}")
+
+
+def load_baseline(path: Path) -> dict[str, MetricsDict]:
+    """Load and validate a baseline JSON file.
+
+    Raises :class:`ValidationError` for missing files, malformed JSON,
+    or entries missing required metric keys / having non-numeric values.
+    """
+    if not path.exists():
+        raise ValidationError(f"baseline file not found: {path}")
+    try:
+        with path.open() as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValidationError(f"baseline {path} is not valid JSON: {e}") from e
+    if not isinstance(raw, dict):
+        raise ValidationError(f"baseline {path} must be a JSON object, got {type(raw).__name__}")
+
+    validated: dict[str, MetricsDict] = {}
+    for img_name, entry in raw.items():
+        if not isinstance(img_name, str):
+            raise ValidationError(f"baseline key {img_name!r} is not a string")
+        if not isinstance(entry, dict):
+            raise ValidationError(
+                f"baseline[{img_name!r}] must be an object, got {type(entry).__name__}"
+            )
+        missing = _METRIC_KEYS - set(entry.keys())
+        if missing:
+            raise ValidationError(
+                f"baseline[{img_name!r}] missing required keys: {sorted(missing)}"
+            )
+        for key in _METRIC_KEYS:
+            value = entry[key]
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValidationError(
+                    f"baseline[{img_name!r}][{key!r}] must be numeric, got {type(value).__name__}"
+                )
+        validated[img_name] = entry  # type: ignore[assignment]
+    return validated
 
 
 def compare_to_baseline(results: dict[str, dict], baseline: dict[str, dict]) -> list[str]:
@@ -155,6 +213,7 @@ def compare_to_baseline(results: dict[str, dict], baseline: dict[str, dict]) -> 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -183,29 +242,30 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.image_dir.is_dir():
-        print(f"error: '{args.image_dir}' is not a directory", file=sys.stderr)
+    try:
+        if not args.image_dir.is_dir():
+            raise ValidationError(f"'{args.image_dir}' is not a directory")
+
+        images = sorted(p for p in args.image_dir.iterdir() if p.suffix.lower() in SUPPORTED)
+        if not images:
+            raise ValidationError(f"no PNG/WebP images found in {args.image_dir}")
+
+        print(f"Benchmarking {len(images)} image(s) in {args.image_dir}")
+        results: dict[str, dict] = {}
+        for img_path in images:
+            print(f"  {img_path.name} ...", end=" ", flush=True)
+            results[img_path.name] = compute_metrics(img_path)
+            print("ok")
+
+        baseline: dict[str, dict] | None = None
+        if args.compare:
+            if not args.compare.exists():
+                print(f"warning: baseline file '{args.compare}' not found — skipping comparison")
+            else:
+                baseline = {k: dict(v) for k, v in load_baseline(args.compare).items()}
+    except ImageCropperError as e:
+        print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
-
-    images = sorted(p for p in args.image_dir.iterdir() if p.suffix.lower() in SUPPORTED)
-    if not images:
-        print(f"No PNG/WebP images found in {args.image_dir}")
-        sys.exit(1)
-
-    print(f"Benchmarking {len(images)} image(s) in {args.image_dir}")
-    results: dict[str, dict] = {}
-    for img_path in images:
-        print(f"  {img_path.name} ...", end=" ", flush=True)
-        results[img_path.name] = compute_metrics(img_path)
-        print("ok")
-
-    baseline: dict[str, dict] | None = None
-    if args.compare:
-        if not args.compare.exists():
-            print(f"warning: baseline file '{args.compare}' not found — skipping comparison")
-        else:
-            with open(args.compare) as f:
-                baseline = json.load(f)
 
     print_results(results, baseline)
 

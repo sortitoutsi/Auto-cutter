@@ -1,36 +1,78 @@
 #!/usr/bin/env python3
 """
-Download the last 100 pending source images from sortitoutsi.net queue.
-Saves files to ./input/ using the image's alt name.
+Download pending source images from the sortitoutsi.net submission queue.
+Saves files to ./input/ using each image's alt name.
 
 Usage:
-    SITSI_COOKIE="your_session_cookie" python3 download_queue.py
+    SITSI_COOKIE="your_session_cookie" python -m image_cropper.pipeline.download_queue
 
 To get your session cookie:
     1. Open sortitoutsi.net in your browser and log in
     2. Open DevTools (F12) → Application → Cookies → sortitoutsi.net
     3. Copy the value of the session/login cookie (e.g. 'laravel_session' or 'remember_web_...')
-    4. Run: SITSI_COOKIE="name=value; name2=value2" python3 download_queue.py
+    4. Run with SITSI_COOKIE="name=value; name2=value2"
 """
+
+from __future__ import annotations
 
 import os
 import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://sortitoutsi.net"
-QUEUE_URL = (
+from image_cropper.errors import ImageCropperError, ValidationError
+from image_cropper.types import QueueEntry
+
+BASE_URL: str = "https://sortitoutsi.net"
+ALLOWED_HOSTS: set[str] = {"sortitoutsi.net", "www.sortitoutsi.net"}
+QUEUE_URL: str = (
     "https://sortitoutsi.net/graphics/submissions/1/queue"
     "?type=source&status=pending&megapack_status=&inpack=&new_player="
     "&game_item_id=&submitted_by_id=&sort=submitted_at-desc&submit=1"
 )
-INPUT_DIR = Path(__file__).parent / "input"
-MAX_IMAGES = 50
+INPUT_DIR: Path = Path(__file__).parent / "input"
+MAX_IMAGES: int = 50
+
+# RFC-style cookie value: name=value pairs, separated by ";"
+# Names are restricted to token chars per RFC 6265; we accept the common set.
+_COOKIE_PAIR_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+=[^;]*$")
+
+
+def validate_cookie_string(raw: str) -> str:
+    """Validate a `name=value(;name=value)*` cookie string.
+
+    Raises :class:`ValidationError` if the string contains no recognizable
+    name=value pairs.
+    """
+    if not raw or not raw.strip():
+        raise ValidationError("SITSI_COOKIE is empty")
+    parts = [p.strip() for p in raw.split(";") if p.strip()]
+    valid = [p for p in parts if _COOKIE_PAIR_RE.match(p)]
+    if not valid:
+        raise ValidationError(
+            f"SITSI_COOKIE has no valid name=value pairs (got {len(parts)} segment(s))"
+        )
+    return raw
+
+
+def validate_image_url(url: str) -> str:
+    """Reject URLs not on the sortitoutsi.net domain.
+
+    Light SSRF guard since the session cookie travels with these requests.
+    Raises :class:`ValidationError` for any other host or non-HTTPS scheme.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValidationError(f"refusing non-HTTP(S) URL: {url}")
+    host = (parsed.hostname or "").lower()
+    if host not in ALLOWED_HOSTS:
+        raise ValidationError(f"refusing URL outside sortitoutsi.net: {url}")
+    return url
 
 
 def get_session(cookie_str: str) -> requests.Session:
@@ -57,24 +99,22 @@ def strip_size_params(url: str) -> str:
     params = parse_qs(parsed.query, keep_blank_values=True)
     params.pop("width", None)
     params.pop("height", None)
-    # Rebuild query string preserving order
     new_query = "&".join(f"{k}={v[0]}" for k, v in params.items())
     return urlunparse(parsed._replace(query=new_query))
 
 
 def safe_filename(name: str) -> str:
-    """Turn an alt-name into a safe filename, keeping the extension if any."""
+    """Turn an alt-name into a safe filename, keeping any existing extension."""
     name = name.strip()
-    # Replace path separators and other unsafe chars
     name = re.sub(r'[\\/:*?"<>|]', "_", name)
     return name
 
 
-def collect_image_entries(session: requests.Session) -> list[dict]:
+def collect_image_entries(session: requests.Session) -> list[QueueEntry]:
     """Scrape queue pages and collect up to MAX_IMAGES image entries."""
-    entries = []
+    entries: list[QueueEntry] = []
     page = 1
-    seen_urls = set()
+    seen_urls: set[str] = set()
 
     while len(entries) < MAX_IMAGES:
         url = QUEUE_URL + f"&page={page}"
@@ -86,32 +126,38 @@ def collect_image_entries(session: requests.Session) -> list[dict]:
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Images are shown as <img> tags with a src pointing to the CDN
-        # They live inside submission cards/rows
         imgs = soup.select("img[src*='/graphics/']")
         if not imgs:
-            # Try broader selector
             imgs = soup.select("img[alt]")
 
         found_on_page = 0
         for img in imgs:
             src = img.get("src", "")
-            alt = img.get("alt", "").strip()
+            alt_raw = img.get("alt", "")
+            if isinstance(src, list):
+                src = src[0] if src else ""
+            if isinstance(alt_raw, list):
+                alt_raw = alt_raw[0] if alt_raw else ""
+            alt = alt_raw.strip()
             if not src or not alt:
                 continue
             if src in seen_urls:
                 continue
-            # Skip tiny UI icons (width/height attrs ≤ 30px heuristic)
             w = img.get("width", "")
             h = img.get("height", "")
             try:
-                if int(w) <= 30 or int(h) <= 30:
+                if int(str(w)) <= 30 or int(str(h)) <= 30:
                     continue
             except (ValueError, TypeError):
                 pass
 
             full_url = src if src.startswith("http") else BASE_URL + src
             full_url = strip_size_params(full_url)
+            try:
+                validate_image_url(full_url)
+            except ValidationError as e:
+                print(f"  skip: {e}", file=sys.stderr)
+                continue
 
             seen_urls.add(src)
             entries.append({"url": full_url, "alt": alt})
@@ -146,26 +192,26 @@ def guess_extension(url: str, content_type: str) -> str:
     }.get(ct, ".jpg")
 
 
-def download_images(session: requests.Session, entries: list[dict]):
+def download_images(session: requests.Session, entries: list[QueueEntry]) -> None:
     INPUT_DIR.mkdir(exist_ok=True)
     total = len(entries)
     ok = 0
     for i, entry in enumerate(entries, 1):
         url = entry["url"]
         alt = entry["alt"]
+        try:
+            validate_image_url(url)
+        except ValidationError as e:
+            print(f"    SKIP: {e}", file=sys.stderr)
+            continue
         print(f"[{i}/{total}] {alt}")
         try:
             resp = session.get(url, timeout=60, stream=True)
             resp.raise_for_status()
             ext = guess_extension(url, resp.headers.get("Content-Type", ""))
-            # Use alt name as filename; add extension if not already present
             base = safe_filename(alt)
-            if not base.lower().endswith(ext.lower()):
-                filename = base + ext
-            else:
-                filename = base
+            filename = base if base.lower().endswith(ext.lower()) else base + ext
             dest = INPUT_DIR / filename
-            # Avoid overwriting; append index if needed
             if dest.exists():
                 stem = Path(filename).stem
                 dest = INPUT_DIR / f"{stem}_{i}{ext}"
@@ -182,27 +228,29 @@ def download_images(session: requests.Session, entries: list[dict]):
     print(f"\nDone. Downloaded {ok}/{total} images to {INPUT_DIR}/")
 
 
-def main():
+def main() -> None:
     cookie_str = os.environ.get("SITSI_COOKIE", "")
-    if not cookie_str:
-        print(
-            "ERROR: Set the SITSI_COOKIE environment variable with your browser cookies.\n"
-            "\n"
-            "How to get it:\n"
-            "  1. Log in to sortitoutsi.net in your browser\n"
-            "  2. Open DevTools → Application → Cookies → sortitoutsi.net\n"
-            "  3. Copy all cookie name=value pairs, separated by semicolons\n"
-            "  4. Run: SITSI_COOKIE='laravel_session=abc123; remember_web_...=xyz' python3 download_queue.py",
-            file=sys.stderr,
-        )
+    try:
+        if not cookie_str:
+            raise ValidationError(
+                "Set the SITSI_COOKIE environment variable with your browser cookies.\n"
+                "\n"
+                "How to get it:\n"
+                "  1. Log in to sortitoutsi.net in your browser\n"
+                "  2. Open DevTools → Application → Cookies → sortitoutsi.net\n"
+                "  3. Copy all cookie name=value pairs, separated by semicolons\n"
+                "  4. Run: SITSI_COOKIE='laravel_session=abc123; remember_web_...=xyz' "
+                "python -m image_cropper.pipeline.download_queue"
+            )
+        validate_cookie_string(cookie_str)
+    except ImageCropperError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
     session = get_session(cookie_str)
     entries = collect_image_entries(session)
     if not entries:
-        print(
-            "No images found. Check your cookie / the page structure.", file=sys.stderr
-        )
+        print("No images found. Check your cookie / the page structure.", file=sys.stderr)
         sys.exit(1)
 
     print(f"\nCollected {len(entries)} images. Starting download…\n")

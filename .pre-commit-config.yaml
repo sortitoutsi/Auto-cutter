@@ -21,6 +21,7 @@ repos:
     rev: v1.16.0
     hooks:
       - id: mypy
+        files: ^src/image_cropper/
         additional_dependencies:
           - types-requests
           - types-Pillow
