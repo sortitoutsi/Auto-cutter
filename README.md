@@ -4,7 +4,7 @@ An automated pipeline + GUI that turns raw player source images into clean
 250×250 transparent-background portrait cutouts.
 
 ```
-align eyes → crop head+shoulders → remove background → portrait crop → deglow
+align eyes → crop head+shoulders → remove background → portrait crop → deglow → center on canvas
 ```
 
 Comes with a cross-platform GUI (PySide6) where you can load images,
@@ -93,7 +93,8 @@ ic-align         input/  output/aligned/      [--debug]
 ic-crop-face     output/aligned/  output/cropped/
 ic-remove-bg     --input output/cropped/  --output output/transparent/
 ic-crop-portrait output/transparent/  output/portrait/  [--chin-pixels 10]
-ic-deglow        output/portrait/  output/final/  --overwrite
+ic-deglow        output/portrait/  output/deglowed/  --overwrite
+ic-center        output/deglowed/  output/final/
 ic-download      # (downloads from sortitoutsi — needs SITSI_COOKIE env var)
 ```
 
@@ -152,6 +153,7 @@ image-cropper/
 │       ├── remove_background.py# step 3 – AI background removal (BiRefNet)
 │       ├── crop_cutout.py      # step 4 – 250×250 portrait crop
 │       ├── deglow.py           # step 5 – remove glow/halo on alpha edges
+│       ├── finalize_cutout.py  # step 6 – center on 250×250 canvas
 │       └── download_queue.py   # sortitoutsi downloader
 ├── docs/
 │   ├── USAGE.md

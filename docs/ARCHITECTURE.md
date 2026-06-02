@@ -25,10 +25,13 @@ remove_background.py  →  output/transparent/ (RGBA, AI matting)
   crop_cutout.py      →  output/portrait/   (250×250 portrait)
         │
         ▼
-   deglow.py          →  output/final/      (fringe correction)
+   deglow.py          →  output/deglowed/   (fringe correction)
+        │
+        ▼
+finalize_cutout.py   →  output/final/      (center on 250×250 canvas)
 ```
 
-`pipeline.sh` automates all six steps, manages a throwaway venv, and cleans
+`pipeline.sh` automates all seven steps, manages a throwaway venv, and cleans
 up intermediate directories on exit.
 
 ---
@@ -119,12 +122,13 @@ background ("glow"). The script:
    blond / pale subjects get a gentler touch (quadratic ramp)
 4. Additionally suppresses excess brightness beyond the blend
 
-### finalize-cutout.py
+### finalize_cutout.py
 
-Standalone utility. Crops the tight bounding box of non-transparent pixels,
-scales down if larger than 250×250, and centers on a fresh transparent canvas.
-Not part of the main pipeline; used for ad-hoc re-centering of hand-edited
-cutouts.
+The final pipeline step. Crops the tight bounding box of non-transparent
+pixels, scales down if the content exceeds 250×250, and pastes it centered on
+a fresh 250×250 transparent canvas. This ensures the delivered portrait is
+pixel-perfectly centered regardless of any slight off-center shifts introduced
+by earlier steps.
 
 ---
 
@@ -137,7 +141,8 @@ cutouts.
 | After crop_source | Same as input | JPEG quality 95 when saved as JPEG |
 | After remove_background | PNG (RGBA) | Lossless, compress level 9 |
 | After crop_cutout | PNG (RGBA) | 250×250, LANCZOS resize |
-| After deglow | PNG (RGBA) | Final delivery format |
+| After deglow | PNG (RGBA) | Fringe-corrected |
+| After center | PNG (RGBA) | 250×250, subject centered on transparent canvas — final delivery format |
 
 ---
 
@@ -162,6 +167,7 @@ the scripts. They are gitignored so the repository stays lightweight.
 | remove_background (MPS, 2048) | 15 – 40 s |
 | crop_cutout | < 1 s |
 | deglow | < 1 s |
+| center | < 1 s |
 
 Background removal dominates. Use `--no-ensemble` or `--input-size 1024` to
 trade quality for speed.

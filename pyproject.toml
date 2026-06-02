@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "image-cropper"
 version = "0.1.0"
-description = "Automated portrait pipeline + cross-platform GUI: align → crop → remove background → portrait crop → deglow"
+description = "Automated portrait pipeline + cross-platform GUI: align → crop → remove background → portrait crop → deglow → center on canvas"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "Krissmed" }]
@@ -83,6 +83,7 @@ ic-crop-face     = "image_cropper.pipeline.crop_source:main"
 ic-remove-bg     = "image_cropper.pipeline.remove_background:main"
 ic-crop-portrait = "image_cropper.pipeline.crop_cutout:main"
 ic-deglow        = "image_cropper.pipeline.deglow:main"
+ic-center        = "image_cropper.pipeline.finalize_cutout:main"
 ic-download      = "image_cropper.pipeline.download_queue:main"
 
 [project.urls]
