@@ -1,10 +1,14 @@
-# Requires Python 3.13 — PyTorch has no wheels for 3.14 yet.
-# The pipeline creates and destroys a venv automatically.
+# Dependencies are defined in pyproject.toml — install with:
+#     pip install .
+#
+# This file is kept for backwards compatibility with `pipeline.sh` and
+# tools that still expect a requirements.txt.
+
+# GUI
+PySide6>=6.6
 
 # Face detection / alignment
 mediapipe>=0.10.0
-# dlib source builds fail on macOS 26 (fp.h missing from SDK include path);
-# dlib-bin provides identical prebuilt wheels.
 dlib-bin>=20.0.1
 opencv-python>=4.8.0
 

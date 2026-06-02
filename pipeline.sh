@@ -72,9 +72,9 @@ echo "Using: $PYTHON_BIN ($($PYTHON_BIN --version))"
 PYTHON="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 
-echo "Installing requirements..."
+echo "Installing image-cropper package..."
 "$PIP" install --quiet --upgrade pip
-"$PIP" install --quiet -r "$SCRIPT_DIR/requirements.txt"
+"$PIP" install --quiet "$SCRIPT_DIR"
 echo "Venv ready."
 
 # --- step 1: download ---
@@ -86,7 +86,7 @@ if [[ $SKIP_DOWNLOAD -eq 0 ]]; then
         echo "Export it before running: SITSI_COOKIE='...' ./pipeline.sh" >&2
         exit 1
     fi
-    "$PYTHON" "$SCRIPT_DIR/scripts/download_queue.py"
+    "$PYTHON" -m image_cropper.pipeline.download_queue
     INPUT_DIR="$SCRIPT_DIR/input"
 else
     echo ""
@@ -96,29 +96,29 @@ fi
 # --- step 2: align eyes ---
 echo ""
 echo "=== Step 2/6: Aligning eyes ==="
-"$PYTHON" "$SCRIPT_DIR/scripts/align.py" "$INPUT_DIR" "$TMP_ALIGNED"
+"$PYTHON" -m image_cropper.pipeline.align "$INPUT_DIR" "$TMP_ALIGNED"
 
 # --- step 3: crop faces ---
 echo ""
 echo "=== Step 3/6: Cropping faces ==="
-"$PYTHON" "$SCRIPT_DIR/scripts/crop_source.py" "$TMP_ALIGNED" "$TMP_CROPPED"
+"$PYTHON" -m image_cropper.pipeline.crop_source "$TMP_ALIGNED" "$TMP_CROPPED"
 
 # --- step 4: remove background ---
 echo ""
 echo "=== Step 4/6: Removing backgrounds ==="
-"$PYTHON" "$SCRIPT_DIR/scripts/remove_background.py" \
+"$PYTHON" -m image_cropper.pipeline.remove_background \
     --input "$TMP_CROPPED" \
     --output "$TMP_TRANSPARENT"
 
 # --- step 5: crop portrait ---
 echo ""
 echo "=== Step 5/6: Cropping to portrait (250×250) ==="
-"$PYTHON" "$SCRIPT_DIR/scripts/crop_cutout.py" "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
+"$PYTHON" -m image_cropper.pipeline.crop_cutout "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
 
 # --- step 6: deglow ---
 echo ""
 echo "=== Step 6/6: Removing glow/halo ==="
-"$PYTHON" "$SCRIPT_DIR/scripts/deglow.py" "$TMP_PORTRAIT" "$OUTPUT_DIR" --overwrite
+"$PYTHON" -m image_cropper.pipeline.deglow "$TMP_PORTRAIT" "$OUTPUT_DIR" --overwrite
 
 echo ""
 echo "=== Pipeline complete ==="

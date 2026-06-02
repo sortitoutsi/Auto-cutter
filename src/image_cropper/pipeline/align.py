@@ -9,27 +9,16 @@ Usage:
 """
 
 import argparse
-import bz2
 import math
 import sys
-import urllib.request
 import numpy as np
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 
+from image_cropper.models import face_landmarker_path, dlib_model_path
+
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
-
-# MediaPipe Face Landmarker (478 landmarks + iris)
-LANDMARKER_PATH = Path(__file__).parent / "face_landmarker.task"
-LANDMARKER_URL = (
-    "https://storage.googleapis.com/mediapipe-models/"
-    "face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-)
-
-# dlib 68-point shape predictor
-DLIB_MODEL_PATH = Path(__file__).parent / "shape_predictor_68_face_landmarks.dat"
-DLIB_MODEL_URL = "http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
 
 # MediaPipe iris landmark indices (requires output_face_blendshapes=False, output_facial_transformation_matrixes=False)
 # Landmarks 468-472: left iris, 473-477: right iris (center is 468 and 473)
@@ -42,36 +31,11 @@ _DLIB_RIGHT_EYE = list(range(42, 48))
 
 
 def ensure_landmarker() -> bool:
-    if LANDMARKER_PATH.exists():
-        return True
-    print(f"Downloading MediaPipe Face Landmarker → {LANDMARKER_PATH.name} ...")
-    try:
-        urllib.request.urlretrieve(LANDMARKER_URL, LANDMARKER_PATH)
-        print("  Model downloaded.\n")
-        return True
-    except Exception as e:
-        print(f"  [!] Could not download landmarker model: {e}")
-        return False
+    return face_landmarker_path().exists()
 
 
 def ensure_dlib_model() -> bool:
-    if DLIB_MODEL_PATH.exists():
-        return True
-    bz2_path = DLIB_MODEL_PATH.with_suffix(".dat.bz2")
-    print(f"Downloading dlib 68-point predictor (~100 MB) → {DLIB_MODEL_PATH.name} ...")
-    try:
-        urllib.request.urlretrieve(DLIB_MODEL_URL, bz2_path)
-        print("  Decompressing...")
-        with bz2.open(bz2_path, "rb") as src, open(DLIB_MODEL_PATH, "wb") as dst:
-            dst.write(src.read())
-        bz2_path.unlink()
-        print("  dlib model ready.\n")
-        return True
-    except Exception as e:
-        print(f"  [!] Could not download dlib model: {e}")
-        if bz2_path.exists():
-            bz2_path.unlink()
-        return False
+    return dlib_model_path().exists()
 
 
 def _centroid(points) -> tuple[float, float]:
@@ -89,7 +53,7 @@ def detect_eyes_landmarker(image_rgb: np.ndarray):
     from mediapipe.tasks import python as mp_tasks
 
     h, w = image_rgb.shape[:2]
-    base_opts = mp_tasks.BaseOptions(model_asset_path=str(LANDMARKER_PATH))
+    base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_landmarker_path()))
     opts = mp_vision.FaceLandmarkerOptions(
         base_options=base_opts,
         output_face_blendshapes=False,
@@ -141,7 +105,7 @@ def detect_eyes_dlib(image_rgb: np.ndarray):
     import dlib
 
     detector  = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(str(DLIB_MODEL_PATH))
+    predictor = dlib.shape_predictor(str(dlib_model_path()))
 
     gray  = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     dets  = detector(gray, 1)
@@ -189,7 +153,7 @@ def detect_eyes_opencv(image_rgb: np.ndarray):
 def detect_eyes(image_rgb: np.ndarray):
     """Try MediaPipe Landmarker → dlib → OpenCV Haar."""
     # --- MediaPipe Face Landmarker ---
-    if LANDMARKER_PATH.exists():
+    if face_landmarker_path().exists():
         try:
             result = detect_eyes_landmarker(image_rgb)
             if result:
@@ -199,7 +163,7 @@ def detect_eyes(image_rgb: np.ndarray):
             print(f"  [!] MediaPipe Landmarker failed ({e}), trying dlib...")
 
     # --- dlib ---
-    if DLIB_MODEL_PATH.exists():
+    if dlib_model_path().exists():
         try:
             result = detect_eyes_dlib(image_rgb)
             if result:

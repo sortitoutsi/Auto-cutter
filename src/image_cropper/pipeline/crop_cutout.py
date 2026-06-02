@@ -15,20 +15,13 @@ Usage:
 
 import argparse
 import sys
-import urllib.request
 import numpy as np
 from pathlib import Path
 from PIL import Image
 
+from image_cropper.models import face_landmarker_path, dlib_model_path
+
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
-
-LANDMARKER_PATH = Path(__file__).parent / "face_landmarker.task"
-LANDMARKER_URL = (
-    "https://storage.googleapis.com/mediapipe-models/"
-    "face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-)
-
-DLIB_MODEL_PATH = Path(__file__).parent / "shape_predictor_68_face_landmarks.dat"
 
 OUTPUT_SIZE = 250
 
@@ -64,16 +57,7 @@ def find_hair_top(image: Image.Image) -> int | None:
 
 
 def ensure_landmarker() -> bool:
-    if LANDMARKER_PATH.exists():
-        return True
-    print(f"Downloading MediaPipe Face Landmarker → {LANDMARKER_PATH.name} ...")
-    try:
-        urllib.request.urlretrieve(LANDMARKER_URL, LANDMARKER_PATH)
-        print("  Model downloaded.\n")
-        return True
-    except Exception as e:
-        print(f"  [!] Could not download landmarker model: {e}")
-        return False
+    return face_landmarker_path().exists()
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +76,7 @@ def _landmarks_mediapipe(image_rgb: np.ndarray):
     from mediapipe.tasks import python as mp_tasks
 
     h, w = image_rgb.shape[:2]
-    base_opts = mp_tasks.BaseOptions(model_asset_path=str(LANDMARKER_PATH))
+    base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_landmarker_path()))
     opts = mp_vision.FaceLandmarkerOptions(
         base_options=base_opts,
         output_face_blendshapes=False,
@@ -122,7 +106,7 @@ def _landmarks_dlib(image_rgb: np.ndarray):
     import cv2
 
     detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(str(DLIB_MODEL_PATH))
+    predictor = dlib.shape_predictor(str(dlib_model_path()))
 
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     dets = detector(gray, 1)
@@ -165,7 +149,7 @@ def detect_face_geometry(image_rgb: np.ndarray):
     Tries MediaPipe first, then dlib.
     """
     # --- MediaPipe ---
-    if LANDMARKER_PATH.exists():
+    if face_landmarker_path().exists():
         try:
             lms = _landmarks_mediapipe(image_rgb)
             if lms:
@@ -191,7 +175,7 @@ def detect_face_geometry(image_rgb: np.ndarray):
             print(f"  [!] MediaPipe failed ({e}), trying dlib ...")
 
     # --- dlib fallback ---
-    if DLIB_MODEL_PATH.exists():
+    if dlib_model_path().exists():
         try:
             geo = _landmarks_dlib(image_rgb)
             if geo:
@@ -208,19 +192,21 @@ def detect_face_geometry(image_rgb: np.ndarray):
 # ---------------------------------------------------------------------------
 
 
-def compute_crop(geo: dict, img_w: int, img_h: int, hair_top_y: int | None = None):
+def compute_crop(geo: dict, img_w: int, img_h: int, hair_top_y: int | None = None, chin_pixels: int | None = None):
     """
     Returns (left, top, right, bottom) crop box, or None if the image doesn't
     have enough pixels below the chin to include a shirt area.
 
     hair_top_y: first non-transparent row (from find_hair_top). When provided
     this is used as the crop top; otherwise falls back to landmark extrapolation.
+    chin_pixels: override for CHIN_PIXELS_AT_OUTPUT (output pixels below chin).
     """
     chin_y = geo["chin_y"]
     forehead_y = geo["forehead_y"]
     face_h = geo["face_height"]
     left_x = geo["left_x"]
     right_x = geo["right_x"]
+    chin_px = chin_pixels if chin_pixels is not None else CHIN_PIXELS_AT_OUTPUT
 
     # --- Shirt check: must have enough image below the chin ---
     pixels_below_chin = img_h - chin_y
@@ -237,10 +223,9 @@ def compute_crop(geo: dict, img_w: int, img_h: int, hair_top_y: int | None = Non
         crop_top = max(0, crop_top)
 
     # --- Bottom: chin + fixed pixel margin ---
-    # Scale CHIN_PIXELS_AT_OUTPUT (at 250×250) to full-res pixels using the
-    # hair-to-chin span as the reference.
+    # Scale chin_px (at 250×250) to full-res pixels using the hair-to-chin span.
     vertical_span = chin_y - crop_top
-    chin_margin = vertical_span * (CHIN_PIXELS_AT_OUTPUT / OUTPUT_SIZE)
+    chin_margin = vertical_span * (chin_px / OUTPUT_SIZE)
     crop_bottom = min(chin_y + chin_margin, img_h)
 
     # --- Horizontal: center on face midpoint, add side padding ---
@@ -306,7 +291,7 @@ def crop_with_padding(image: Image.Image, left, top, right, bottom) -> Image.Ima
 # ---------------------------------------------------------------------------
 
 
-def process_image(input_path: Path, output_path: Path) -> bool:
+def process_image(input_path: Path, output_path: Path, chin_pixels: int | None = None) -> bool:
     image = Image.open(input_path)
     try:
         from PIL import ImageOps
@@ -326,7 +311,7 @@ def process_image(input_path: Path, output_path: Path) -> bool:
         print(f"  [!] No face detected — skipping")
         return False
 
-    box = compute_crop(geo, img_w, img_h, hair_top_y=hair_top_y)
+    box = compute_crop(geo, img_w, img_h, hair_top_y=hair_top_y, chin_pixels=chin_pixels)
     if box is None:
         print(f"  [skip] Not enough shirt below chin — skipping")
         return False
@@ -370,8 +355,15 @@ def main():
         default=None,
         help="Output file or directory (default: output/portrait/ or same dir for single file)",
     )
+    parser.add_argument(
+        "--chin-pixels",
+        type=int,
+        default=None,
+        help=f"Output pixels below chin (default: {CHIN_PIXELS_AT_OUTPUT})",
+    )
     args = parser.parse_args()
 
+    chin_pixels = args.chin_pixels
     input_path = Path(args.input)
 
     # Single file mode
@@ -386,7 +378,7 @@ def main():
         ensure_landmarker()
         print(f"Processing: {input_path.name}")
         try:
-            if process_image(input_path, out_path):
+            if process_image(input_path, out_path, chin_pixels=chin_pixels):
                 print(f"  Saved → {out_path}")
             else:
                 print(f"  Not saved.")
@@ -418,7 +410,7 @@ def main():
         out_path = output_dir / (img_path.stem + ".png")
         print(f"Processing: {img_path.name}")
         try:
-            if process_image(img_path, out_path):
+            if process_image(img_path, out_path, chin_pixels=chin_pixels):
                 ok += 1
                 print(f"  Saved → {out_path}\n")
             else:

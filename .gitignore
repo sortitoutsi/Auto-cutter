@@ -2,6 +2,14 @@
 .venv/
 venv_bg/
 
+# Build artefacts
+build/
+dist/
+*.egg-info/
+src/*.egg-info/
+__pycache__/
+*.pyc
+
 # Generated outputs (all stages)
 output/
 input/
@@ -12,10 +20,11 @@ output_transparent/
 # A/B testing artefacts
 ab_testing/
 
-# ML model weights (downloaded on first run)
-face_landmarker.task
-face_detector.tflite
-shape_predictor_68_face_landmarks.dat
+# ML model weights at project root (legacy; new layout uses src/image_cropper/data/
+# for the bundled one, and ~/.cache for downloaded ones).
+/face_landmarker.task
+/face_detector.tflite
+/shape_predictor_68_face_landmarks.dat
 
 # Claude Code settings
 .claude/

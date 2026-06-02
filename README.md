@@ -1,77 +1,133 @@
 # image-cropper
 
-An automated pipeline that turns raw football-player source images into clean
-250×250 transparent-background portrait cutouts for
-[sortitoutsi.net](https://sortitoutsi.net) / Football Manager face packs.
+An automated pipeline + GUI that turns raw player source images into clean
+250×250 transparent-background portrait cutouts.
+
+```
+align eyes → crop head+shoulders → remove background → portrait crop → deglow
+```
+
+Comes with a cross-platform GUI (PySide6) where you can load images,
+preview each pipeline step, see the eye-detection debug overlay, and tune
+the portrait crop on the fly.
 
 > **AI Notice** — See [AI-NOTICE.md](AI-NOTICE.md) for disclosure about how
 > this project was developed.
 
 ---
 
-## What it does
+## Install (macOS, Linux, Windows)
 
+Requires Python **3.11, 3.12, 3.13, or 3.14** on PATH. The installers create
+a local virtualenv at `.venv/` and install everything into it.
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/Krissmed/image-cropper.git
+cd image-cropper
+./install.sh
 ```
-download → align eyes → crop head+shoulders → remove background → portrait crop → deglow
+
+Launch:
+
+```bash
+./launch_gui.sh
+# or
+.venv/bin/image-cropper
 ```
 
-Each step is a standalone Python script; `pipeline.sh` wires them together
-from end to end and handles venv creation, cleanup, and intermediate
-directories automatically.
+### Windows (PowerShell)
 
-Final output: `output/final/*.png` — 250×250 RGBA PNGs, transparent
-background, glow-free edges.
+```powershell
+git clone https://github.com/Krissmed/image-cropper.git
+cd image-cropper
+.\install.ps1
+```
+
+Launch:
+
+```powershell
+.\launch_gui.bat
+# or
+.venv\Scripts\image-cropper.exe
+```
+
+### Direct pip (any platform)
+
+```bash
+pip install .
+image-cropper            # GUI
+python -m image_cropper  # same thing
+```
+
+> First launch downloads ~95 MB of additional model weights (dlib face
+> landmarks) to a per-user cache directory (`~/Library/Caches/image-cropper`
+> on macOS, `%LOCALAPPDATA%\image-cropper` on Windows,
+> `$XDG_CACHE_HOME/image-cropper` on Linux). Background removal also
+> downloads BiRefNet weights from Hugging Face on first run (~2 GB).
 
 ---
 
-## Quick start
+## What the GUI does
 
-### Full pipeline (download + process)
-
-```bash
-SITSI_COOKIE="laravel_session=…; remember_web_…=…" ./pipeline.sh
-```
-
-### Process images you already have
-
-```bash
-./pipeline.sh --skip-download                    # reads from input/
-./pipeline.sh --skip-download --input my_imgs/   # custom directory
-```
-
-### Run a single step
-
-```bash
-source .venv/bin/activate      # or let the pipeline create one for you
-
-python align.py input/ output/aligned/
-python crop_source.py output/aligned/ output/cropped/
-python remove_background.py --input output/cropped/ --output output/transparent/
-python crop_cutout.py output/transparent/ output/portrait/
-python deglow.py output/portrait/ output/final/ --overwrite
-```
-
-See [docs/USAGE.md](docs/USAGE.md) for all flags and per-script options.
+- **Add Files / Add Folder** — load any mix of images
+- **Per-image preview** — toggle between original, debug overlay, or latest output
+- **Per-step Run buttons** — process one stage at a time and inspect the result
+- **Show debug overlay** — saves and displays the eye-detection overlay from
+  the Align step
+- **Chin pixels** — live-tune how many output pixels (out of 250) sit below
+  the chin in the portrait crop
+- **Run all checked steps** — batch the whole pipeline across every loaded image
+- **Final outputs** — copied to the output directory shown in the toolbar
+  (default: `~/image-cropper-output`)
 
 ---
 
-## Requirements
+## CLI usage
 
-- macOS or Linux (tested on macOS 15+)
-- Python 3.11 – 3.13 (PyTorch has no wheels for 3.14 yet)
-- ~4 GB disk for ML model weights (downloaded automatically on first run)
-- GPU strongly recommended for background removal (MPS on Apple Silicon,
-  CUDA on Nvidia); CPU works but is slow
-
-Install Python dependencies:
+After installation each pipeline step is also exposed as a console script:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+ic-align         input/  output/aligned/      [--debug]
+ic-crop-face     output/aligned/  output/cropped/
+ic-remove-bg     --input output/cropped/  --output output/transparent/
+ic-crop-portrait output/transparent/  output/portrait/  [--chin-pixels 10]
+ic-deglow        output/portrait/  output/final/  --overwrite
+ic-download      # (downloads from sortitoutsi — needs SITSI_COOKIE env var)
 ```
 
-The pipeline creates and tears down its own throwaway venv automatically,
-so you only need a manual venv when running scripts individually.
+Or invoke as Python modules: `python -m image_cropper.pipeline.align …`
+
+The end-to-end wrapper still works:
+
+```bash
+SITSI_COOKIE="laravel_session=…" ./pipeline.sh
+./pipeline.sh --skip-download                   # use existing input/
+./pipeline.sh --skip-download --input my_imgs/  # custom directory
+```
+
+---
+
+## Optional: standalone binary build
+
+For users who want a single double-clickable bundle (~3 GB because of
+PyTorch + MediaPipe + dlib):
+
+```bash
+# macOS / Linux
+./build_binary.sh
+# → dist/image-cropper/        (folder bundle)
+# → dist/image-cropper.app/    (macOS only)
+
+# Windows (PowerShell)
+.\build_binary.ps1
+# → dist\image-cropper\
+```
+
+PyInstaller cannot cross-compile, so run the build on the target OS.
+
+For most users, `./install.sh` (or `.\install.ps1`) is faster and lighter.
 
 ---
 
@@ -79,41 +135,51 @@ so you only need a manual venv when running scripts individually.
 
 ```
 image-cropper/
-├── pipeline.sh          # end-to-end orchestrator
-├── download_queue.py    # step 1 – download from sortitoutsi queue
-├── align.py             # step 2 – eye-level rotation
-├── crop_source.py       # step 3 – face + shoulder crop
-├── remove_background.py # step 4 – AI background removal (BiRefNet)
-├── crop_cutout.py       # step 5 – 250×250 portrait crop
-├── deglow.py            # step 6 – remove glow/halo on alpha edges
-├── finalize-cutout.py   # utility – center cutout on blank canvas
-├── requirements.txt
+├── pyproject.toml              # package metadata + dependencies
+├── install.sh / install.ps1    # cross-platform installers
+├── launch_gui.sh / .bat        # GUI launchers
+├── build_binary.sh / .ps1      # optional PyInstaller bundle
+├── image_cropper.spec          # PyInstaller config
+├── pipeline.sh                 # end-to-end CLI orchestrator
+├── src/image_cropper/
+│   ├── gui.py                  # PySide6 GUI
+│   ├── models.py               # model file resolution (bundled / cache)
+│   ├── data/
+│   │   └── face_landmarker.task (3.6 MB, bundled)
+│   └── pipeline/
+│       ├── align.py            # step 1 – eye-level rotation
+│       ├── crop_source.py      # step 2 – face + shoulder crop
+│       ├── remove_background.py# step 3 – AI background removal (BiRefNet)
+│       ├── crop_cutout.py      # step 4 – 250×250 portrait crop
+│       ├── deglow.py           # step 5 – remove glow/halo on alpha edges
+│       └── download_queue.py   # sortitoutsi downloader
 ├── docs/
-│   ├── USAGE.md         # detailed per-script usage
-│   └── ARCHITECTURE.md  # design decisions and data flow
-├── CONTRIBUTING.md
+│   ├── USAGE.md
+│   └── ARCHITECTURE.md
 └── AI-NOTICE.md
 ```
 
 Output (gitignored):
 
 ```
-output/
-├── aligned/      # after step 2
-├── cropped/      # after step 3
-├── transparent/  # after step 4
-├── portrait/     # after step 5
-└── final/        # after step 6 (delivery)
+output/                  # intermediate and final pipeline output
+~/image-cropper-output/  # default GUI output location
 ```
 
 ---
 
-## Getting your SITSI cookie
+## Platform notes
 
-1. Log in to [sortitoutsi.net](https://sortitoutsi.net) in your browser
-2. Open DevTools → Application → Cookies → `sortitoutsi.net`
-3. Copy all `name=value` pairs, joined by `; `
-4. Export before running: `export SITSI_COOKIE="laravel_session=abc; …"`
+| Platform        | Status      | Notes                                                                    |
+|-----------------|-------------|--------------------------------------------------------------------------|
+| macOS (Apple)   | Primary     | Uses MPS for background removal. Tested on macOS 15+.                    |
+| macOS (Intel)   | Should work | CPU-only background removal (slow).                                      |
+| Linux x86_64    | Should work | CUDA on Nvidia, otherwise CPU. May need `libgl1` (`apt install libgl1`). |
+| Linux ARM64     | Should work | dlib-bin wheels available; CPU only.                                     |
+| Windows x86_64  | Should work | CUDA on Nvidia, otherwise CPU.                                           |
+
+> "Should work" = the build targets have wheels, but I personally only
+> dev on macOS. File an issue if something breaks on your platform.
 
 ---
 

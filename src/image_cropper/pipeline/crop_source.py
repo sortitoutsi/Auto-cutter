@@ -7,11 +7,12 @@ Minimum output size: 500x500px. No downscaling.
 
 import os
 import sys
-import urllib.request
 import numpy as np
 from pathlib import Path
 from PIL import Image
 import cv2
+
+from image_cropper.models import face_detector_path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
@@ -22,24 +23,9 @@ SIDE_PADDING_FACTOR = 0.35  # horizontal padding on each side
 
 MIN_OUTPUT_SIZE = 500
 
-MODEL_PATH = Path(__file__).parent / "face_detector.tflite"
-MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/"
-    "face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
-)
-
 
 def ensure_model():
-    if MODEL_PATH.exists():
-        return True
-    print(f"Downloading face detection model → {MODEL_PATH.name} ...")
-    try:
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        print("  Model downloaded.\n")
-        return True
-    except Exception as e:
-        print(f"  [!] Could not download model: {e}")
-        return False
+    return face_detector_path().exists()
 
 
 def detect_face_mediapipe(image_rgb: np.ndarray):
@@ -48,7 +34,7 @@ def detect_face_mediapipe(image_rgb: np.ndarray):
     from mediapipe.tasks.python import vision as mp_vision
     from mediapipe.tasks import python as mp_tasks
 
-    base_opts = mp_tasks.BaseOptions(model_asset_path=str(MODEL_PATH))
+    base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_detector_path()))
     opts = mp_vision.FaceDetectorOptions(
         base_options=base_opts,
         min_detection_confidence=0.4,
@@ -82,7 +68,7 @@ def detect_face_opencv(image_rgb: np.ndarray):
 
 def detect_face(image_rgb: np.ndarray):
     """Try MediaPipe first, fall back to OpenCV Haar cascade."""
-    if MODEL_PATH.exists():
+    if face_detector_path().exists():
         try:
             result = detect_face_mediapipe(image_rgb)
             if result:
