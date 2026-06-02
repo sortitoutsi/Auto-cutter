@@ -6,12 +6,14 @@ Usage:
     python finalize-cutout.py input.png [output.png]
     python finalize-cutout.py input_dir/ output_dir/
 """
+
 from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
-from PIL import Image
 
+from PIL import Image
 
 CANVAS_SIZE = (250, 250)
 
@@ -46,7 +48,9 @@ def center_on_canvas(src: Path, dst: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Center cutout(s) on a 250×250 canvas")
     parser.add_argument("input", help="Input PNG file or directory")
-    parser.add_argument("output", nargs="?", help="Output PNG file or directory (default: alongside input)")
+    parser.add_argument(
+        "output", nargs="?", help="Output PNG file or directory (default: alongside input)"
+    )
     args = parser.parse_args()
 
     src = Path(args.input)
@@ -63,10 +67,7 @@ def main() -> None:
         if not src.exists():
             print(f"File not found: {src}", file=sys.stderr)
             sys.exit(1)
-        if args.output:
-            dst = Path(args.output)
-        else:
-            dst = src.with_name(src.stem + "_final.png")
+        dst = Path(args.output) if args.output else src.with_name(src.stem + "_final.png")
         center_on_canvas(src, dst)
 
 

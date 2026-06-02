@@ -8,6 +8,7 @@ Lookup order for each model:
        $XDG_CACHE_HOME/image-cropper on Linux)
     3. Auto-download to the user cache dir.
 """
+
 from __future__ import annotations
 
 import bz2
@@ -67,7 +68,7 @@ def _resolve(name: str, url: str, *, bz2_decompress: bool = False) -> Path:
             bz2_path.unlink()
         else:
             urllib.request.urlretrieve(url, cached)
-        print(f"  Downloaded.\n", flush=True)
+        print("  Downloaded.\n", flush=True)
         return cached
     except Exception as e:
         print(f"  [!] Download failed: {e}", flush=True)

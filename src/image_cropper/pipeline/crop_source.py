@@ -5,10 +5,10 @@ Reads from input/, writes to output/.
 Minimum output size: 500x500px. No downscaling.
 """
 
-import os
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 from PIL import Image
 
 from image_cropper.models import face_detector_path
@@ -30,8 +30,8 @@ def ensure_model():
 def detect_face_mediapipe(image_rgb: np.ndarray):
     """Detect face using MediaPipe Tasks API (0.10.x+). Returns (x,y,w,h) or None."""
     import mediapipe as mp
-    from mediapipe.tasks.python import vision as mp_vision
     from mediapipe.tasks import python as mp_tasks
+    from mediapipe.tasks.python import vision as mp_vision
 
     base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_detector_path()))
     opts = mp_vision.FaceDetectorOptions(
@@ -57,9 +57,7 @@ def detect_face_opencv(image_rgb: np.ndarray):
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     cascade = cv2.CascadeClassifier(cascade_path)
-    faces = cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
-    )
+    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
     if not len(faces):
         return None
     # Pick largest face
@@ -126,9 +124,7 @@ def process_image(input_path: Path, output_path: Path):
         return False
 
     face_x, face_y, face_w, face_h = face
-    left, top, right, bottom = compute_crop_box(
-        face_x, face_y, face_w, face_h, img_w, img_h
-    )
+    left, top, right, bottom = compute_crop_box(face_x, face_y, face_w, face_h, img_w, img_h)
 
     crop_w = right - left
     crop_h = bottom - top
@@ -155,9 +151,17 @@ def process_image(input_path: Path, output_path: Path):
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Detect faces and crop to head+shoulders.")
-    parser.add_argument("input_dir", nargs="?", default="input", help="Input directory (default: input)")
-    parser.add_argument("output_dir", nargs="?", default="output/cropped", help="Output directory (default: output/cropped)")
+    parser.add_argument(
+        "input_dir", nargs="?", default="input", help="Input directory (default: input)"
+    )
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default="output/cropped",
+        help="Output directory (default: output/cropped)",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -170,11 +174,7 @@ def main():
     output_dir.mkdir(exist_ok=True)
     ensure_model()
 
-    images = [
-        p
-        for p in sorted(input_dir.iterdir())
-        if p.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    images = [p for p in sorted(input_dir.iterdir()) if p.suffix.lower() in SUPPORTED_EXTENSIONS]
     if not images:
         print(f"No supported images found in {input_dir}/")
         sys.exit(0)

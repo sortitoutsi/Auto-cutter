@@ -10,6 +10,7 @@ Serialization shapes that need to round-trip through JSON (benchmark
 metrics, scraped queue entries) use :class:`TypedDict` instead of
 dataclasses so ``json.dump`` keeps working on plain dicts.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -6,6 +6,7 @@ its inputs are well-formed. All validators raise
 :class:`~image_cropper.errors.ValidationError` for any failure so
 ``main()`` wrappers can catch a single type.
 """
+
 from __future__ import annotations
 
 import os
@@ -87,9 +88,7 @@ def validate_image_array(
         )
     expected_dtype = np.dtype(dtype)
     if arr.dtype != expected_dtype:
-        raise ValidationError(
-            f"expected dtype {expected_dtype}, got {arr.dtype}"
-        )
+        raise ValidationError(f"expected dtype {expected_dtype}, got {arr.dtype}")
 
 
 def validate_crop_box(box: CropBox, img_w: int, img_h: int) -> None:
@@ -103,9 +102,7 @@ def validate_crop_box(box: CropBox, img_w: int, img_h: int) -> None:
     if box.right <= 0 or box.bottom <= 0:
         raise ValidationError(f"crop box {box} lies entirely above/left of the image")
     if box.left >= img_w or box.top >= img_h:
-        raise ValidationError(
-            f"crop box {box} lies entirely outside image ({img_w}x{img_h})"
-        )
+        raise ValidationError(f"crop box {box} lies entirely outside image ({img_w}x{img_h})")
 
 
 __all__ = [

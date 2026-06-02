@@ -12,6 +12,7 @@ Usage:
     python deglow.py input_dir/ output_dir/
     python deglow.py input_dir/ output_dir/ --strength 0.8 --radius 6
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,15 +21,14 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import distance_transform_edt, generic_filter
-
+from scipy.ndimage import distance_transform_edt
 
 SUPPORTED = {".png", ".webp"}
 
 # Alpha thresholds
-OPAQUE_MIN   = 220   # pixel is "interior" if alpha >= this
-FRINGE_MAX   = 219   # pixel is "fringe"   if alpha <  this
-FRINGE_MIN   =   5   # ignore near-invisible dust below this
+OPAQUE_MIN = 220  # pixel is "interior" if alpha >= this
+FRINGE_MAX = 219  # pixel is "fringe"   if alpha <  this
+FRINGE_MIN = 5  # ignore near-invisible dust below this
 
 # Search radius (px) when looking for interior colour anchor
 ANCHOR_RADIUS = 8
@@ -36,8 +36,8 @@ ANCHOR_RADIUS = 8
 # Strength range: how aggressively we pull fringe toward anchor colour.
 # For a very dark anchor (brightness ~0) we use STRENGTH_MAX.
 # For a very light anchor (brightness ~255) we use STRENGTH_MIN.
-STRENGTH_MIN = 0.25   # light blond / pale skin
-STRENGTH_MAX = 0.90   # black hair / very dark skin
+STRENGTH_MIN = 0.25  # light blond / pale skin
+STRENGTH_MAX = 0.90  # black hair / very dark skin
 
 
 def luminance(rgb: np.ndarray) -> np.ndarray:
@@ -60,9 +60,7 @@ def build_anchor_map(
     opaque_mask = alpha >= OPAQUE_MIN  # (H, W) bool
 
     # distance transform: distance of every pixel to nearest opaque pixel
-    dist, (nearest_row, nearest_col) = distance_transform_edt(
-        ~opaque_mask, return_indices=True
-    )
+    dist, (nearest_row, nearest_col) = distance_transform_edt(~opaque_mask, return_indices=True)
 
     # Gather the nearest opaque pixel's colour for every fringe pixel
     anchor_rgb = rgb[nearest_row, nearest_col].astype(np.float32)  # (H, W, 3)
@@ -77,7 +75,7 @@ def deglow_image(
 ) -> Image.Image:
     """Apply deglow to a single RGBA image."""
     rgba = np.array(img.convert("RGBA"), dtype=np.float32)  # (H,W,4) 0-255
-    rgb  = rgba[..., :3]
+    rgb = rgba[..., :3]
     alpha = rgba[..., 3]
 
     # --- fringe mask ---
@@ -135,12 +133,21 @@ def process_file(src: Path, dst: Path, strength: float, radius: int) -> bool:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Remove glow/halo from cutout PNGs.")
-    p.add_argument("input",  help="Input PNG/WebP file or directory")
-    p.add_argument("output", nargs="?", help="Output file or directory (default: beside input with '_dg' suffix)")
-    p.add_argument("--strength", type=float, default=1.0,
-                   help="Global strength multiplier 0-2 (default: 1.0)")
-    p.add_argument("--radius",   type=int,   default=ANCHOR_RADIUS,
-                   help=f"Max fringe radius in px (default: {ANCHOR_RADIUS})")
+    p.add_argument("input", help="Input PNG/WebP file or directory")
+    p.add_argument(
+        "output",
+        nargs="?",
+        help="Output file or directory (default: beside input with '_dg' suffix)",
+    )
+    p.add_argument(
+        "--strength", type=float, default=1.0, help="Global strength multiplier 0-2 (default: 1.0)"
+    )
+    p.add_argument(
+        "--radius",
+        type=int,
+        default=ANCHOR_RADIUS,
+        help=f"Max fringe radius in px (default: {ANCHOR_RADIUS})",
+    )
     p.add_argument("--overwrite", action="store_true")
     args = p.parse_args()
 

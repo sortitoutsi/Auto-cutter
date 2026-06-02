@@ -15,11 +15,12 @@ Usage:
 
 import argparse
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 from PIL import Image
 
-from image_cropper.models import face_landmarker_path, dlib_model_path
+from image_cropper.models import dlib_model_path, face_landmarker_path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
@@ -55,7 +56,6 @@ def find_hair_top(image: Image.Image) -> int | None:
     return int(hits[0]) if len(hits) else None
 
 
-
 def ensure_landmarker() -> bool:
     return face_landmarker_path().exists()
 
@@ -72,8 +72,8 @@ def _landmarks_mediapipe(image_rgb: np.ndarray):
     Index 152 → bottom of chin
     """
     import mediapipe as mp
-    from mediapipe.tasks.python import vision as mp_vision
     from mediapipe.tasks import python as mp_tasks
+    from mediapipe.tasks.python import vision as mp_vision
 
     h, w = image_rgb.shape[:2]
     base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_landmarker_path()))
@@ -102,8 +102,8 @@ def _landmarks_dlib(image_rgb: np.ndarray):
     Returns a dict with keys: chin_y, forehead_y, left_x, right_x.
     Uses dlib 68-point; forehead is estimated from eye + chin geometry.
     """
-    import dlib
     import cv2
+    import dlib
 
     detector = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(str(dlib_model_path()))
@@ -192,7 +192,9 @@ def detect_face_geometry(image_rgb: np.ndarray):
 # ---------------------------------------------------------------------------
 
 
-def compute_crop(geo: dict, img_w: int, img_h: int, hair_top_y: int | None = None, chin_pixels: int | None = None):
+def compute_crop(
+    geo: dict, img_w: int, img_h: int, hair_top_y: int | None = None, chin_pixels: int | None = None
+):
     """
     Returns (left, top, right, bottom) crop box, or None if the image doesn't
     have enough pixels below the chin to include a shirt area.
@@ -308,21 +310,19 @@ def process_image(input_path: Path, output_path: Path, chin_pixels: int | None =
 
     geo = detect_face_geometry(img_rgb)
     if geo is None:
-        print(f"  [!] No face detected — skipping")
+        print("  [!] No face detected — skipping")
         return False
 
     box = compute_crop(geo, img_w, img_h, hair_top_y=hair_top_y, chin_pixels=chin_pixels)
     if box is None:
-        print(f"  [skip] Not enough shirt below chin — skipping")
+        print("  [skip] Not enough shirt below chin — skipping")
         return False
 
     left, top, right, bottom = box
     crop_size = right - left  # square
 
     hair_src = (
-        f"alpha scan row {hair_top_y}"
-        if hair_top_y is not None
-        else "landmark extrapolation"
+        f"alpha scan row {hair_top_y}" if hair_top_y is not None else "landmark extrapolation"
     )
     print(
         f"  [{geo['detector']}]  "
@@ -381,7 +381,7 @@ def main():
             if process_image(input_path, out_path, chin_pixels=chin_pixels):
                 print(f"  Saved → {out_path}")
             else:
-                print(f"  Not saved.")
+                print("  Not saved.")
         except Exception as e:
             print(f"  [!] Error: {e}")
         return
@@ -395,11 +395,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     ensure_landmarker()
 
-    images = [
-        p
-        for p in sorted(input_path.iterdir())
-        if p.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    images = [p for p in sorted(input_path.iterdir()) if p.suffix.lower() in SUPPORTED_EXTENSIONS]
     if not images:
         print(f"No supported images found in {input_path}/")
         sys.exit(0)

@@ -11,21 +11,22 @@ Usage:
 import argparse
 import math
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from image_cropper.models import face_landmarker_path, dlib_model_path
+from image_cropper.models import dlib_model_path, face_landmarker_path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
 # MediaPipe iris landmark indices (requires output_face_blendshapes=False, output_facial_transformation_matrixes=False)
 # Landmarks 468-472: left iris, 473-477: right iris (center is 468 and 473)
-_LEFT_IRIS_IDX  = [468, 469, 470, 471, 472]
+_LEFT_IRIS_IDX = [468, 469, 470, 471, 472]
 _RIGHT_IRIS_IDX = [473, 474, 475, 476, 477]
 
 # dlib eye landmark indices in the 68-point model
-_DLIB_LEFT_EYE  = list(range(36, 42))
+_DLIB_LEFT_EYE = list(range(36, 42))
 _DLIB_RIGHT_EYE = list(range(42, 48))
 
 
@@ -48,8 +49,8 @@ def detect_eyes_landmarker(image_rgb: np.ndarray):
     Returns (left_eye, right_eye, detector_name) or None.
     """
     import mediapipe as mp
-    from mediapipe.tasks.python import vision as mp_vision
     from mediapipe.tasks import python as mp_tasks
+    from mediapipe.tasks.python import vision as mp_vision
 
     h, w = image_rgb.shape[:2]
     base_opts = mp_tasks.BaseOptions(model_asset_path=str(face_landmarker_path()))
@@ -74,19 +75,23 @@ def detect_eyes_landmarker(image_rgb: np.ndarray):
 
     # Use iris landmarks if present (requires 478+ points)
     if total >= 478:
-        left_pts  = [(lms[i].x * w, lms[i].y * h) for i in _LEFT_IRIS_IDX  if i < total]
+        left_pts = [(lms[i].x * w, lms[i].y * h) for i in _LEFT_IRIS_IDX if i < total]
         right_pts = [(lms[i].x * w, lms[i].y * h) for i in _RIGHT_IRIS_IDX if i < total]
         label = "MediaPipe Iris"
     else:
         # Fall back to eye-contour landmarks (indices 33, 133 for left; 362, 263 for right)
-        left_pts  = [(lms[i].x * w, lms[i].y * h) for i in [33, 133, 160, 158, 144, 153] if i < total]
-        right_pts = [(lms[i].x * w, lms[i].y * h) for i in [362, 263, 387, 385, 373, 380] if i < total]
+        left_pts = [
+            (lms[i].x * w, lms[i].y * h) for i in [33, 133, 160, 158, 144, 153] if i < total
+        ]
+        right_pts = [
+            (lms[i].x * w, lms[i].y * h) for i in [362, 263, 387, 385, 373, 380] if i < total
+        ]
         label = "MediaPipe Eye Contour"
 
     if not left_pts or not right_pts:
         return None
 
-    left_eye  = _centroid(left_pts)
+    left_eye = _centroid(left_pts)
     right_eye = _centroid(right_pts)
 
     # Ensure left is on the left side of the image
@@ -104,19 +109,19 @@ def detect_eyes_dlib(image_rgb: np.ndarray):
     import cv2
     import dlib
 
-    detector  = dlib.get_frontal_face_detector()
+    detector = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(str(dlib_model_path()))
 
-    gray  = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-    dets  = detector(gray, 1)
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    dets = detector(gray, 1)
     if not dets:
         return None
 
-    det   = max(dets, key=lambda d: d.area())
+    det = max(dets, key=lambda d: d.area())
     shape = predictor(gray, det)
-    pts   = [(shape.part(i).x, shape.part(i).y) for i in range(68)]
+    pts = [(shape.part(i).x, shape.part(i).y) for i in range(68)]
 
-    left_eye  = _centroid([pts[i] for i in _DLIB_LEFT_EYE])
+    left_eye = _centroid([pts[i] for i in _DLIB_LEFT_EYE])
     right_eye = _centroid([pts[i] for i in _DLIB_RIGHT_EYE])
 
     if left_eye[0] > right_eye[0]:
@@ -131,15 +136,17 @@ def detect_eyes_opencv(image_rgb: np.ndarray):
 
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
 
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    eye_cascade  = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
 
     faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
     if not len(faces):
         return None
 
     fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-    face_gray = gray[fy:fy + fh, fx:fx + fw]
+    face_gray = gray[fy : fy + fh, fx : fx + fw]
 
     eyes = eye_cascade.detectMultiScale(face_gray, 1.1, 10, minSize=(20, 20))
     if len(eyes) < 2:
@@ -149,7 +156,11 @@ def detect_eyes_opencv(image_rgb: np.ndarray):
     centers = [(fx + ex + ew // 2, fy + ey + eh // 2) for ex, ey, ew, eh in eyes]
     centers.sort(key=lambda c: c[0])
     left_eye, right_eye = centers
-    return (float(left_eye[0]), float(left_eye[1])), (float(right_eye[0]), float(right_eye[1])), "OpenCV Haar"
+    return (
+        (float(left_eye[0]), float(left_eye[1])),
+        (float(right_eye[0]), float(right_eye[1])),
+        "OpenCV Haar",
+    )
 
 
 def detect_eyes(image_rgb: np.ndarray):
@@ -214,8 +225,8 @@ def save_debug_overlay(
     )
 
     for (ex, ey), color in [
-        (left_eye,  (255, 80,  80,  230)),
-        (right_eye, (255, 160, 40,  230)),
+        (left_eye, (255, 80, 80, 230)),
+        (right_eye, (255, 160, 40, 230)),
     ]:
         draw.ellipse(
             [(ex - radius, ey - radius), (ex + radius, ey + radius)],
@@ -243,7 +254,7 @@ def save_debug_overlay(
     ]
     pad = font_size // 2
     box_h = (font_size + 4) * len(lines) + pad * 2
-    box_w = max(len(l) for l in lines) * (font_size // 2) + pad * 2
+    box_w = max(len(line) for line in lines) * (font_size // 2) + pad * 2
     draw.rectangle([(0, 0), (box_w, box_h)], fill=(0, 0, 0, 160))
     for i, line in enumerate(lines):
         draw.text((pad, pad + i * (font_size + 4)), line, fill=(255, 255, 255, 255), font=font)
@@ -256,6 +267,7 @@ def process_image(input_path: Path, output_path: Path, debug_dir: Path | None = 
     image = Image.open(input_path)
     try:
         from PIL import ImageOps
+
         image = ImageOps.exif_transpose(image)
     except Exception:
         pass
@@ -307,14 +319,23 @@ def process_image(input_path: Path, output_path: Path, debug_dir: Path | None = 
 
 def main():
     parser = argparse.ArgumentParser(description="Align images so eyes are level.")
-    parser.add_argument("input_dir", nargs="?", default="input", help="Input directory (default: input)")
-    parser.add_argument("output_dir", nargs="?", default="output/aligned", help="Output directory (default: output/aligned)")
-    parser.add_argument("--debug", action="store_true", help="Save debug overlay images to <output_dir>/debug/")
+    parser.add_argument(
+        "input_dir", nargs="?", default="input", help="Input directory (default: input)"
+    )
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default="output/aligned",
+        help="Output directory (default: output/aligned)",
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Save debug overlay images to <output_dir>/debug/"
+    )
     args = parser.parse_args()
 
-    input_dir  = Path(args.input_dir)
+    input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
-    debug_dir  = output_dir / "debug" if args.debug else None
+    debug_dir = output_dir / "debug" if args.debug else None
 
     if not input_dir.exists():
         print(f"Error: '{input_dir}' directory not found.")

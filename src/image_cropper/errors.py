@@ -5,6 +5,7 @@ so callers (including pipeline ``main()`` wrappers and the GUI subprocess
 runner) can catch a single base type and still distinguish failure modes
 when needed.
 """
+
 from __future__ import annotations
 
 

@@ -18,7 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -160,10 +160,7 @@ def download_images(session: requests.Session, entries: list[dict]):
             ext = guess_extension(url, resp.headers.get("Content-Type", ""))
             # Use alt name as filename; add extension if not already present
             base = safe_filename(alt)
-            if not base.lower().endswith(ext.lower()):
-                filename = base + ext
-            else:
-                filename = base
+            filename = base if base.lower().endswith(ext.lower()) else base + ext
             dest = INPUT_DIR / filename
             # Avoid overwriting; append index if needed
             if dest.exists():
@@ -200,9 +197,7 @@ def main():
     session = get_session(cookie_str)
     entries = collect_image_entries(session)
     if not entries:
-        print(
-            "No images found. Check your cookie / the page structure.", file=sys.stderr
-        )
+        print("No images found. Check your cookie / the page structure.", file=sys.stderr)
         sys.exit(1)
 
     print(f"\nCollected {len(entries)} images. Starting download…\n")

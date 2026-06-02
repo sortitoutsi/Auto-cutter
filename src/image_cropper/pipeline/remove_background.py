@@ -20,10 +20,11 @@ Defaults are tuned for max quality, not speed. Slowness is expected.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import torch
@@ -45,6 +46,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 # Device + model loading
 # ---------------------------------------------------------------------------
 
+
 def select_device(arg: str) -> torch.device:
     if arg == "cpu":
         return torch.device("cpu")
@@ -61,6 +63,7 @@ def select_device(arg: str) -> torch.device:
 
 def load_model(model_id: str, device: torch.device):
     from transformers import AutoModelForImageSegmentation
+
     print(f"  Loading {model_id} ...", flush=True)
     model = AutoModelForImageSegmentation.from_pretrained(model_id, trust_remote_code=True)
     # Force fp32 — checkpoints sometimes ship with mixed-precision buffers that
@@ -74,7 +77,10 @@ def load_model(model_id: str, device: torch.device):
 # Image prep
 # ---------------------------------------------------------------------------
 
-def pad_to_square(image: Image.Image, fill=(0, 0, 0)) -> tuple[Image.Image, tuple[int, int, int, int]]:
+
+def pad_to_square(
+    image: Image.Image, fill=(0, 0, 0)
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
     """Letterbox-pad to a square, return (padded, (left, top, right, bottom))."""
     w, h = image.size
     side = max(w, h)
@@ -101,8 +107,11 @@ def to_model_tensor(image: Image.Image, size: int, device: torch.device) -> torc
 # Inference
 # ---------------------------------------------------------------------------
 
+
 @torch.no_grad()
-def predict_single(image_padded: Image.Image, model, device: torch.device, flip: bool, size: int) -> torch.Tensor:
+def predict_single(
+    image_padded: Image.Image, model, device: torch.device, flip: bool, size: int
+) -> torch.Tensor:
     """Return one [size, size] alpha tensor on `device`, in [0,1]."""
     src = ImageOps.mirror(image_padded) if flip else image_padded
     x = to_model_tensor(src, size, device)
@@ -142,19 +151,19 @@ def crop_padding(alpha: torch.Tensor, image_rgb: Image.Image) -> torch.Tensor:
     """Remove letterbox padding from a square alpha (alpha is at DEFAULT_INPUT_SIZE resolution)."""
     w, h = image_rgb.size
     side = max(w, h)
-    a_size = alpha.shape[-1]
     # alpha is at model resolution; first upscale to the padded image's real size, then crop.
     alpha_full = F.interpolate(
         alpha[None, None], size=(side, side), mode="bicubic", align_corners=False, antialias=True
     )[0, 0]
     left = (side - w) // 2
     top = (side - h) // 2
-    return alpha_full[top:top + h, left:left + w].clamp(0, 1)
+    return alpha_full[top : top + h, left : left + w].clamp(0, 1)
 
 
 # ---------------------------------------------------------------------------
 # Edge refinement (multi-channel guided filter against the original RGB)
 # ---------------------------------------------------------------------------
+
 
 def _box_filter(x: torch.Tensor, radius: int) -> torch.Tensor:
     """Separable box filter via cumulative sums. x: [..., H, W]. Same shape out."""
@@ -169,7 +178,9 @@ def _box_filter(x: torch.Tensor, radius: int) -> torch.Tensor:
     return out.view(orig_shape)
 
 
-def guided_filter_multichannel(guide_chw: torch.Tensor, src_hw: torch.Tensor, radius: int, eps: float) -> torch.Tensor:
+def guided_filter_multichannel(
+    guide_chw: torch.Tensor, src_hw: torch.Tensor, radius: int, eps: float
+) -> torch.Tensor:
     """3-channel guided filter (He et al. 2010, matrix form).
 
     guide_chw: [3, H, W] float in [0, 1]
@@ -178,21 +189,21 @@ def guided_filter_multichannel(guide_chw: torch.Tensor, src_hw: torch.Tensor, ra
     """
     assert guide_chw.shape[0] == 3
     H, W = src_hw.shape
-    I = guide_chw  # [3, H, W]
-    p = src_hw      # [H, W]
+    img = guide_chw  # [3, H, W] — guide image (variable named per He et al. 2010)
+    p = src_hw  # [H, W]
 
-    mean_I = _box_filter(I, radius)            # [3, H, W]
-    mean_p = _box_filter(p, radius)            # [H, W]
-    mean_Ip = _box_filter(I * p[None], radius) # [3, H, W]
-    cov_Ip = mean_Ip - mean_I * mean_p[None]   # [3, H, W]
+    mean_I = _box_filter(img, radius)  # [3, H, W]
+    mean_p = _box_filter(p, radius)  # [H, W]
+    mean_Ip = _box_filter(img * p[None], radius)  # [3, H, W]
+    cov_Ip = mean_Ip - mean_I * mean_p[None]  # [3, H, W]
 
     # 3x3 covariance of I (symmetric): rr rg rb gg gb bb
-    rr = _box_filter(I[0] * I[0], radius) - mean_I[0] * mean_I[0]
-    rg = _box_filter(I[0] * I[1], radius) - mean_I[0] * mean_I[1]
-    rb = _box_filter(I[0] * I[2], radius) - mean_I[0] * mean_I[2]
-    gg = _box_filter(I[1] * I[1], radius) - mean_I[1] * mean_I[1]
-    gb = _box_filter(I[1] * I[2], radius) - mean_I[1] * mean_I[2]
-    bb = _box_filter(I[2] * I[2], radius) - mean_I[2] * mean_I[2]
+    rr = _box_filter(img[0] * img[0], radius) - mean_I[0] * mean_I[0]
+    rg = _box_filter(img[0] * img[1], radius) - mean_I[0] * mean_I[1]
+    rb = _box_filter(img[0] * img[2], radius) - mean_I[0] * mean_I[2]
+    gg = _box_filter(img[1] * img[1], radius) - mean_I[1] * mean_I[1]
+    gb = _box_filter(img[1] * img[2], radius) - mean_I[1] * mean_I[2]
+    bb = _box_filter(img[2] * img[2], radius) - mean_I[2] * mean_I[2]
 
     # Build per-pixel 3x3 covariance + eps*I and invert analytically.
     rr_e = rr + eps
@@ -229,11 +240,13 @@ def guided_filter_multichannel(guide_chw: torch.Tensor, src_hw: torch.Tensor, ra
     mean_a2 = _box_filter(a2, radius)
     mean_b = _box_filter(b, radius)
 
-    q = mean_a0 * I[0] + mean_a1 * I[1] + mean_a2 * I[2] + mean_b
+    q = mean_a0 * img[0] + mean_a1 * img[1] + mean_a2 * img[2] + mean_b
     return q.clamp(0, 1)
 
 
-def guided_refine(alpha_hw: torch.Tensor, image_rgb: Image.Image, device: torch.device, radius: int, eps: float) -> torch.Tensor:
+def guided_refine(
+    alpha_hw: torch.Tensor, image_rgb: Image.Image, device: torch.device, radius: int, eps: float
+) -> torch.Tensor:
     """Refine alpha so its edges follow the image's edges (hair, fly-aways).
 
     Runs on CPU — Kornia's MPS path triggers an IOGPU shmem assert on macOS, and
@@ -241,13 +254,14 @@ def guided_refine(alpha_hw: torch.Tensor, image_rgb: Image.Image, device: torch.
     """
     img_np = np.asarray(image_rgb.convert("RGB"), dtype=np.float32) / 255.0
     guide = torch.from_numpy(img_np).permute(2, 0, 1).contiguous()  # [3, H, W] CPU
-    src = alpha_hw.detach().to("cpu").float()                       # [H, W] CPU
+    src = alpha_hw.detach().to("cpu").float()  # [H, W] CPU
     return guided_filter_multichannel(guide, src, radius=radius, eps=eps)
 
 
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
+
 
 def apply_alpha(image_rgb: Image.Image, alpha_hw: torch.Tensor) -> Image.Image:
     w, h = image_rgb.size
@@ -261,6 +275,7 @@ def apply_alpha(image_rgb: Image.Image, alpha_hw: torch.Tensor) -> Image.Image:
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
+
 
 def process_image(
     input_path: Path,
@@ -293,19 +308,44 @@ def process_image(
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--input", default="cropped", help="Input directory (default: cropped)")
-    p.add_argument("--output", default="output/transparent", help="Output directory (default: output/transparent)")
+    p.add_argument(
+        "--output",
+        default="output/transparent",
+        help="Output directory (default: output/transparent)",
+    )
     p.add_argument("--device", default="auto", choices=["auto", "mps", "cuda", "cpu"])
-    p.add_argument("--no-tta", action="store_true", help="Disable horizontal-flip test-time augmentation")
-    p.add_argument("--no-ensemble", action="store_true", help="Use only BiRefNet_HR-matting (skip salient model)")
+    p.add_argument(
+        "--no-tta", action="store_true", help="Disable horizontal-flip test-time augmentation"
+    )
+    p.add_argument(
+        "--no-ensemble",
+        action="store_true",
+        help="Use only BiRefNet_HR-matting (skip salient model)",
+    )
     p.add_argument("--no-refine", action="store_true", help="Disable guided-filter edge refinement")
-    p.add_argument("--refine-radius", type=int, default=4, help="Guided-filter radius in pixels (default: 4)")
-    p.add_argument("--refine-eps", type=float, default=1e-4, help="Guided-filter regularisation eps (default: 1e-4)")
-    p.add_argument("--input-size", type=int, default=DEFAULT_INPUT_SIZE,
-                   help=f"Model input size (default: {DEFAULT_INPUT_SIZE}). Lower if MPS runs out of memory.")
+    p.add_argument(
+        "--refine-radius", type=int, default=4, help="Guided-filter radius in pixels (default: 4)"
+    )
+    p.add_argument(
+        "--refine-eps",
+        type=float,
+        default=1e-4,
+        help="Guided-filter regularisation eps (default: 1e-4)",
+    )
+    p.add_argument(
+        "--input-size",
+        type=int,
+        default=DEFAULT_INPUT_SIZE,
+        help=f"Model input size (default: {DEFAULT_INPUT_SIZE}). Lower if MPS runs out of memory.",
+    )
     p.add_argument("--limit", type=int, default=0, help="Process only N images (0 = all)")
-    p.add_argument("--overwrite", action="store_true", help="Re-process even if output already exists")
+    p.add_argument(
+        "--overwrite", action="store_true", help="Re-process even if output already exists"
+    )
     args = p.parse_args()
 
     input_dir = Path(args.input)
@@ -317,10 +357,8 @@ def main():
 
     device = select_device(args.device)
     # MPS matmul precision setting is a no-op there but harmless on CPU/CUDA.
-    try:
+    with contextlib.suppress(Exception):
         torch.set_float32_matmul_precision("high")
-    except Exception:
-        pass
 
     images = [p for p in sorted(input_dir.iterdir()) if p.suffix.lower() in SUPPORTED_EXTENSIONS]
     if args.limit > 0:
@@ -331,8 +369,10 @@ def main():
 
     print(f"Device: {device}")
     print(f"Found {len(images)} image(s) in {input_dir}/")
-    print(f"Settings: tta_flip={not args.no_tta}, ensemble={not args.no_ensemble}, "
-          f"refine={not args.no_refine} (radius={args.refine_radius}, eps={args.refine_eps})\n")
+    print(
+        f"Settings: tta_flip={not args.no_tta}, ensemble={not args.no_ensemble}, "
+        f"refine={not args.no_refine} (radius={args.refine_radius}, eps={args.refine_eps})\n"
+    )
 
     models = [load_model(MATTING_MODEL_ID, device)]
     if not args.no_ensemble:
@@ -350,7 +390,10 @@ def main():
         print(f"[{i}/{len(images)}] {img_path.name}")
         try:
             process_image(
-                img_path, out_path, models, device,
+                img_path,
+                out_path,
+                models,
+                device,
                 tta_flip=not args.no_tta,
                 refine=not args.no_refine,
                 refine_radius=args.refine_radius,

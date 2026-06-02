@@ -8,32 +8,52 @@ Launch:
 
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-import shutil
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QSize, QTimer, QMutex, QMutexLocker,
+    QSize,
+    Qt,
+    QThread,
+    Signal,
 )
 from PySide6.QtGui import (
-    QPixmap, QColor, QPainter, QBrush, QFont, QIcon, QAction,
-    QPalette, QDragEnterEvent, QDropEvent,
+    QColor,
+    QFont,
+    QIcon,
+    QPalette,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QListWidget, QListWidgetItem, QTextEdit,
-    QSplitter, QFileDialog, QSpinBox, QGroupBox, QCheckBox,
-    QProgressBar, QScrollArea, QTabBar, QStatusBar, QToolBar,
-    QSizePolicy, QFrame, QLineEdit, QToolButton, QAbstractItemView,
-    QScrollBar, QComboBox, QSpacerItem,
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 # ── paths ──────────────────────────────────────────────────────────────────────
-PYTHON = sys.executable   # GUI must be launched from the same venv as the scripts
+PYTHON = sys.executable  # GUI must be launched from the same venv as the scripts
 
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
@@ -44,40 +64,40 @@ DEFAULT_OUTPUT_DIR = Path.home() / "image-cropper-output"
 # ── pipeline step definitions ──────────────────────────────────────────────────
 STEPS = ["align", "crop_face", "remove_bg", "crop_portrait", "deglow"]
 STEP_LABEL = {
-    "align":        "1. Align Eyes",
-    "crop_face":    "2. Crop Face",
-    "remove_bg":    "3. Remove Background",
-    "crop_portrait":"4. Crop Portrait",
-    "deglow":       "5. Deglow",
+    "align": "1. Align Eyes",
+    "crop_face": "2. Crop Face",
+    "remove_bg": "3. Remove Background",
+    "crop_portrait": "4. Crop Portrait",
+    "deglow": "5. Deglow",
 }
 # Module names — invoked via `python -m image_cropper.pipeline.<module>`
 STEP_MODULE = {
-    "align":        "image_cropper.pipeline.align",
-    "crop_face":    "image_cropper.pipeline.crop_source",
-    "remove_bg":    "image_cropper.pipeline.remove_background",
-    "crop_portrait":"image_cropper.pipeline.crop_cutout",
-    "deglow":       "image_cropper.pipeline.deglow",
+    "align": "image_cropper.pipeline.align",
+    "crop_face": "image_cropper.pipeline.crop_source",
+    "remove_bg": "image_cropper.pipeline.remove_background",
+    "crop_portrait": "image_cropper.pipeline.crop_cutout",
+    "deglow": "image_cropper.pipeline.deglow",
 }
 
-STATUS_PENDING  = "pending"
-STATUS_RUNNING  = "running"
-STATUS_DONE     = "done"
-STATUS_SKIPPED  = "skipped"
-STATUS_ERROR    = "error"
+STATUS_PENDING = "pending"
+STATUS_RUNNING = "running"
+STATUS_DONE = "done"
+STATUS_SKIPPED = "skipped"
+STATUS_ERROR = "error"
 
 STATUS_ICON = {
-    STATUS_PENDING:  "○",
-    STATUS_RUNNING:  "⟳",
-    STATUS_DONE:     "✓",
-    STATUS_SKIPPED:  "⊘",
-    STATUS_ERROR:    "✗",
+    STATUS_PENDING: "○",
+    STATUS_RUNNING: "⟳",
+    STATUS_DONE: "✓",
+    STATUS_SKIPPED: "⊘",
+    STATUS_ERROR: "✗",
 }
 STATUS_COLOR = {
-    STATUS_PENDING:  "#888",
-    STATUS_RUNNING:  "#4a9fd4",
-    STATUS_DONE:     "#4caf50",
-    STATUS_SKIPPED:  "#ff9800",
-    STATUS_ERROR:    "#f44336",
+    STATUS_PENDING: "#888",
+    STATUS_RUNNING: "#4a9fd4",
+    STATUS_DONE: "#4caf50",
+    STATUS_SKIPPED: "#ff9800",
+    STATUS_ERROR: "#f44336",
 }
 
 
@@ -89,11 +109,11 @@ class ImageEntry:
         # step output paths (set after each step runs)
         self.outputs: dict[str, Path] = {}
         # step statuses
-        self.statuses: dict[str, str] = {s: STATUS_PENDING for s in STEPS}
+        self.statuses: dict[str, str] = dict.fromkeys(STEPS, STATUS_PENDING)
         # align debug image path
-        self.debug_align: Optional[Path] = None
+        self.debug_align: Path | None = None
 
-    def latest_output(self) -> Optional[Path]:
+    def latest_output(self) -> Path | None:
         """Most recent step output, or original."""
         for step in reversed(STEPS):
             if step in self.outputs and self.outputs[step].exists():
@@ -104,7 +124,7 @@ class ImageEntry:
 # ── worker thread ──────────────────────────────────────────────────────────────
 class PipelineWorker(QThread):
     log = Signal(str)
-    progress = Signal(int, int)          # current, total
+    progress = Signal(int, int)  # current, total
     image_step_done = Signal(str, str, str)  # image_name, step, status
     finished_all = Signal()
 
@@ -162,9 +182,7 @@ class PipelineWorker(QThread):
                 self.image_step_done.emit(entry.name, step, STATUS_RUNNING)
                 self.log.emit(f"  [{entry.name}]")
 
-                success, out_path, debug_path = self._run_step(
-                    step, in_path, step_out, entry
-                )
+                success, out_path, debug_path = self._run_step(step, in_path, step_out, entry)
 
                 if success and out_path and out_path.exists():
                     entry.outputs[step] = out_path
@@ -190,16 +208,13 @@ class PipelineWorker(QThread):
         in_path: Path,
         out_dir: Path,
         entry: ImageEntry,
-    ) -> tuple[bool | None, Optional[Path], Optional[Path]]:
+    ) -> tuple[bool | None, Path | None, Path | None]:
         """Run one step for one image. Returns (success, out_path, debug_path)."""
         module = STEP_MODULE[step]
         debug_path = None
 
         # Build expected output filename
-        if step in ("align", "crop_face"):
-            out_name = in_path.name
-        else:
-            out_name = in_path.stem + ".png"
+        out_name = in_path.name if step in ("align", "crop_face") else in_path.stem + ".png"
 
         out_path = out_dir / out_name
 
@@ -261,7 +276,7 @@ class PipelineWorker(QThread):
                 return True, candidates[0], debug_path
 
             # Script may have skipped the image legitimately
-            self.log.emit(f"    (no output — image may have been skipped)")
+            self.log.emit("    (no output — image may have been skipped)")
             return None, None, debug_path
 
         except Exception as e:
@@ -309,13 +324,11 @@ class ImagePreview(QLabel):
         self.setMinimumSize(300, 300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background: #1a1a1a; border-radius: 6px;")
-        self._pixmap: Optional[QPixmap] = None
+        self._pixmap: QPixmap | None = None
         self.setText("No image selected")
-        self.setStyleSheet(
-            "background: #1a1a1a; color: #555; border-radius: 6px; font-size: 14px;"
-        )
+        self.setStyleSheet("background: #1a1a1a; color: #555; border-radius: 6px; font-size: 14px;")
 
-    def set_image(self, path: Optional[Path]):
+    def set_image(self, path: Path | None):
         if path is None or not path.exists():
             self._pixmap = None
             self.setText("No image")
@@ -344,7 +357,7 @@ class ImagePreview(QLabel):
 
 # ── step row widget ────────────────────────────────────────────────────────────
 class StepRow(QWidget):
-    run_requested = Signal(str)   # step id
+    run_requested = Signal(str)  # step id
 
     def __init__(self, step_id: str, parent=None):
         super().__init__(parent)
@@ -377,8 +390,8 @@ class MainWindow(QMainWindow):
 
         self._entries: list[ImageEntry] = []
         self._session_dir = Path(tempfile.mkdtemp(prefix="imgcrop_"))
-        self._worker: Optional[PipelineWorker] = None
-        self._current_entry: Optional[ImageEntry] = None
+        self._worker: PipelineWorker | None = None
+        self._current_entry: ImageEntry | None = None
         self._preview_mode = "original"  # original | debug | output
 
         self._setup_ui()
@@ -474,7 +487,11 @@ class MainWindow(QMainWindow):
         btn_row.setSpacing(2)
 
         self._prev_btns: dict[str, QPushButton] = {}
-        for mode, label in [("original", "Original"), ("debug", "Debug (Align)"), ("output", "Latest Output")]:
+        for mode, label in [
+            ("original", "Original"),
+            ("debug", "Debug (Align)"),
+            ("output", "Latest Output"),
+        ]:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setChecked(mode == "original")
@@ -589,7 +606,6 @@ class MainWindow(QMainWindow):
         palette = QPalette()
         bg = QColor("#1e1e1e")
         surface = QColor("#252525")
-        border = QColor("#3a3a3a")
         text = QColor("#e0e0e0")
         accent = QColor("#4a9fd4")
 
@@ -673,7 +689,9 @@ class MainWindow(QMainWindow):
 
     def _add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select Images", str(Path.home()),
+            self,
+            "Select Images",
+            str(Path.home()),
             "Images (*.jpg *.jpeg *.png *.webp *.bmp *.tiff *.tif)",
         )
         for f in files:
@@ -681,9 +699,7 @@ class MainWindow(QMainWindow):
         self._refresh_list()
 
     def _add_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Image Folder", str(Path.home())
-        )
+        folder = QFileDialog.getExistingDirectory(self, "Select Image Folder", str(Path.home()))
         if not folder:
             return
         d = Path(folder)
@@ -720,7 +736,16 @@ class MainWindow(QMainWindow):
             # Thumbnail
             px = QPixmap(str(entry.original))
             if not px.isNull():
-                item.setIcon(QIcon(px.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
+                item.setIcon(
+                    QIcon(
+                        px.scaled(
+                            48,
+                            48,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                )
             self._image_list.addItem(item)
         self._image_count_label.setText(f"{len(self._entries)} image(s)")
         if self._entries and not self._current_entry:
@@ -854,12 +879,12 @@ class MainWindow(QMainWindow):
             self._refresh_item(entry)
             if entry is self._current_entry:
                 self._update_step_statuses()
-                if status == STATUS_DONE:
+                if status == STATUS_DONE and (
+                    self._preview_mode == "output"
+                    or (step == "align" and self._preview_mode == "debug" and entry.debug_align)
+                ):
                     # Auto-switch preview to latest output when step finishes
-                    if self._preview_mode == "output":
-                        self._update_preview()
-                    elif step == "align" and self._preview_mode == "debug" and entry.debug_align:
-                        self._update_preview()
+                    self._update_preview()
 
     def _on_worker_finished(self):
         self._progress.setVisible(False)
@@ -892,10 +917,8 @@ class MainWindow(QMainWindow):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(3000)
-        try:
+        with contextlib.suppress(Exception):
             shutil.rmtree(self._session_dir, ignore_errors=True)
-        except Exception:
-            pass
         super().closeEvent(event)
 
 

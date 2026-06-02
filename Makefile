@@ -1,4 +1,4 @@
-.PHONY: install install-dev lint format typecheck check run gui benchmark benchmark-update benchmark-generate clean
+.PHONY: install install-dev lint format typecheck test check run gui benchmark benchmark-update benchmark-generate clean
 
 PYTHON ?= python3.13
 VENV   := .venv
@@ -26,7 +26,10 @@ format:
 typecheck:
 	$(VENV)/bin/mypy src/
 
-check: lint typecheck
+test:
+	$(VENV)/bin/pytest -q
+
+check: lint typecheck test
 
 run:
 	./pipeline.sh --skip-download

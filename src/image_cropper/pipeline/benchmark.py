@@ -15,6 +15,7 @@ Usage:
   # promote current results as the new baseline
   python scripts/benchmark.py output/final/ --update-baseline benchmarks/baseline.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,25 +30,26 @@ SUPPORTED = {".png", ".webp"}
 DEFAULT_BASELINE = Path(__file__).parent.parent / "benchmarks" / "baseline.json"
 
 # Alpha thresholds — must stay in sync with deglow.py constants
-_ALPHA_FG: int = 127        # pixel counts as foreground
-_FRINGE_MIN: int = 5        # ignore near-invisible dust below this
-_FRINGE_MAX: int = 219      # pixel is fringe if alpha < this (mirrors deglow OPAQUE_MIN-1)
+_ALPHA_FG: int = 127  # pixel counts as foreground
+_FRINGE_MIN: int = 5  # ignore near-invisible dust below this
+_FRINGE_MAX: int = 219  # pixel is fringe if alpha < this (mirrors deglow OPAQUE_MIN-1)
 
 # Maximum allowed absolute delta from baseline before the check fails.
 # Tuned so small algorithm tweaks pass but real regressions do not.
 TOLERANCES: dict[str, float] = {
-    "fg_coverage_pct": 2.0,       # ± 2 pp foreground area
-    "fringe_density_pct": 1.5,    # ± 1.5 pp fringe pixels
+    "fg_coverage_pct": 2.0,  # ± 2 pp foreground area
+    "fringe_density_pct": 1.5,  # ± 1.5 pp fringe pixels
     "mean_fringe_brightness": 10.0,  # ± 10/255 luminance
     "alpha_edge_sharpness": 8.0,  # ± 8 RMS gradient units
-    "h_center_of_mass": 0.05,     # ± 5 % of canvas width off-center
-    "v_center_of_mass": 0.05,     # ± 5 % of canvas height off-center
+    "h_center_of_mass": 0.05,  # ± 5 % of canvas width off-center
+    "v_center_of_mass": 0.05,  # ± 5 % of canvas height off-center
 }
 
 
 # ---------------------------------------------------------------------------
 # Metric computation
 # ---------------------------------------------------------------------------
+
 
 def _luminance(rgb: np.ndarray) -> np.ndarray:
     """BT.601 luminance, input shape (..., 3) in 0-255, output in 0-255."""
@@ -61,8 +63,8 @@ def compute_metrics(img_path: Path) -> dict[str, float]:
         img = img.convert("RGBA")
 
     arr = np.array(img, dtype=np.float32)
-    rgb = arr[:, :, :3]       # (H, W, 3)
-    alpha = arr[:, :, 3]      # (H, W)
+    rgb = arr[:, :, :3]  # (H, W, 3)
+    alpha = arr[:, :, 3]  # (H, W)
 
     H, W = alpha.shape
     total = H * W
@@ -113,6 +115,7 @@ def compute_metrics(img_path: Path) -> dict[str, float]:
 # Reporting
 # ---------------------------------------------------------------------------
 
+
 def _delta_str(value: float, base: float, tolerance: float) -> str:
     delta = value - base
     sign = "+" if delta >= 0 else ""
@@ -155,6 +158,7 @@ def compare_to_baseline(results: dict[str, dict], baseline: dict[str, dict]) -> 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
