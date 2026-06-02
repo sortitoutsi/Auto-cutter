@@ -1,5 +1,6 @@
 ruff>=0.4.0
 mypy>=1.10.0
+pytest>=8.0.0
 pre-commit>=3.7.0
 types-requests>=2.31.0
 types-Pillow>=10.0.0

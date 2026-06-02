@@ -10,7 +10,6 @@ import sys
 import numpy as np
 from pathlib import Path
 from PIL import Image
-import cv2
 
 from image_cropper.models import face_detector_path
 
@@ -53,6 +52,8 @@ def detect_face_mediapipe(image_rgb: np.ndarray):
 
 def detect_face_opencv(image_rgb: np.ndarray):
     """Fallback: Haar cascade face detector (bundled with OpenCV)."""
+    import cv2
+
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     cascade = cv2.CascadeClassifier(cascade_path)

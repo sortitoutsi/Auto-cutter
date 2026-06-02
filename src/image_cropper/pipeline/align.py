@@ -14,7 +14,6 @@ import sys
 import numpy as np
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-import cv2
 
 from image_cropper.models import face_landmarker_path, dlib_model_path
 
@@ -102,6 +101,7 @@ def detect_eyes_dlib(image_rgb: np.ndarray):
     dlib 68-point landmark detector. Averages all eye-ring landmarks for each eye.
     Returns (left_eye, right_eye, detector_name) or None.
     """
+    import cv2
     import dlib
 
     detector  = dlib.get_frontal_face_detector()
@@ -127,6 +127,8 @@ def detect_eyes_dlib(image_rgb: np.ndarray):
 
 def detect_eyes_opencv(image_rgb: np.ndarray):
     """Last-resort: Haar cascade eye detector."""
+    import cv2
+
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
 
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
