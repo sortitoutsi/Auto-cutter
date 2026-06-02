@@ -5,30 +5,34 @@ Reads from input/, writes to output/.
 Minimum output size: 500x500px. No downscaling.
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+from image_cropper.errors import DetectionError, ImageCropperError
 from image_cropper.models import face_detector_path
+from image_cropper.types import CropBox, FaceBBox
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+SUPPORTED_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
 # Padding multipliers relative to detected face height
-HAIR_PADDING_FACTOR = 1.1  # space above face top (covers afros, long hair)
-SHOULDER_PADDING_FACTOR = 0.8  # space below chin (to mid-chest)
-SIDE_PADDING_FACTOR = 0.35  # horizontal padding on each side
+HAIR_PADDING_FACTOR: float = 1.1
+SHOULDER_PADDING_FACTOR: float = 0.8
+SIDE_PADDING_FACTOR: float = 0.35
 
-MIN_OUTPUT_SIZE = 500
+MIN_OUTPUT_SIZE: int = 500
 
 
-def ensure_model():
+def ensure_model() -> bool:
     return face_detector_path().exists()
 
 
-def detect_face_mediapipe(image_rgb: np.ndarray):
-    """Detect face using MediaPipe Tasks API (0.10.x+). Returns (x,y,w,h) or None."""
+def detect_face_mediapipe(image_rgb: np.ndarray) -> FaceBBox | None:
+    """Detect face using MediaPipe Tasks API (0.10.x+)."""
     import mediapipe as mp
     from mediapipe.tasks import python as mp_tasks
     from mediapipe.tasks.python import vision as mp_vision
@@ -47,10 +51,15 @@ def detect_face_mediapipe(image_rgb: np.ndarray):
 
     best = max(result.detections, key=lambda d: d.categories[0].score)
     bbox = best.bounding_box
-    return bbox.origin_x, bbox.origin_y, bbox.width, bbox.height
+    return FaceBBox(
+        x=int(bbox.origin_x),
+        y=int(bbox.origin_y),
+        w=int(bbox.width),
+        h=int(bbox.height),
+    )
 
 
-def detect_face_opencv(image_rgb: np.ndarray):
+def detect_face_opencv(image_rgb: np.ndarray) -> FaceBBox | None:
     """Fallback: Haar cascade face detector (bundled with OpenCV)."""
     import cv2
 
@@ -60,12 +69,11 @@ def detect_face_opencv(image_rgb: np.ndarray):
     faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
     if not len(faces):
         return None
-    # Pick largest face
     x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    return int(x), int(y), int(w), int(h)
+    return FaceBBox(x=int(x), y=int(y), w=int(w), h=int(h))
 
 
-def detect_face(image_rgb: np.ndarray):
+def detect_face(image_rgb: np.ndarray) -> FaceBBox | None:
     """Try MediaPipe first, fall back to OpenCV Haar cascade."""
     if face_detector_path().exists():
         try:
@@ -77,8 +85,22 @@ def detect_face(image_rgb: np.ndarray):
     return detect_face_opencv(image_rgb)
 
 
-def compute_crop_box(face_x, face_y, face_w, face_h, img_w, img_h):
-    """Expand face bbox with padding for hair and shoulders."""
+def compute_crop_box(
+    face_x: int,
+    face_y: int,
+    face_w: int,
+    face_h: int,
+    img_w: int,
+    img_h: int,
+) -> tuple[int, int, int, int]:
+    """Expand face bbox with padding for hair and shoulders.
+
+    Returns ``(left, top, right, bottom)``. Use ``CropBox.from_ltrb(*...)``
+    if a value object is desired.
+    """
+    assert face_w > 0 and face_h > 0, f"degenerate face bbox: {face_w}x{face_h}"
+    assert img_w > 0 and img_h > 0, f"degenerate image: {img_w}x{img_h}"
+
     hair_pad = int(face_h * HAIR_PADDING_FACTOR)
     shoulder_pad = int(face_h * SHOULDER_PADDING_FACTOR)
     side_pad = int(face_w * SIDE_PADDING_FACTOR)
@@ -110,29 +132,35 @@ def compute_crop_box(face_x, face_y, face_w, face_h, img_w, img_h):
         bottom = min(img_h, top + MIN_OUTPUT_SIZE)
         top = max(0, bottom - MIN_OUTPUT_SIZE)
 
+    assert right > left and bottom > top, f"degenerate crop: ({left},{top})-({right},{bottom})"
+    assert left >= 0 and right <= img_w, f"crop x out of bounds: ({left},{right}) vs {img_w}"
+    assert top >= 0 and bottom <= img_h, f"crop y out of bounds: ({top},{bottom}) vs {img_h}"
+
     return left, top, right, bottom
 
 
-def process_image(input_path: Path, output_path: Path):
+def process_image(input_path: Path, output_path: Path) -> bool:
+    """Detect a face in ``input_path`` and save a head+shoulders crop.
+
+    Raises :class:`DetectionError` if no face is found.
+    """
     image = Image.open(input_path)
     img_rgb = np.array(image.convert("RGB"))
     img_h, img_w = img_rgb.shape[:2]
 
     face = detect_face(img_rgb)
     if face is None:
-        print(f"  [!] No face detected — skipping {input_path.name}")
-        return False
+        raise DetectionError(f"no face detected in {input_path.name}")
 
-    face_x, face_y, face_w, face_h = face
-    left, top, right, bottom = compute_crop_box(face_x, face_y, face_w, face_h, img_w, img_h)
+    left, top, right, bottom = compute_crop_box(face.x, face.y, face.w, face.h, img_w, img_h)
+    box = CropBox(left=left, top=top, right=right, bottom=bottom)
 
-    crop_w = right - left
-    crop_h = bottom - top
     print(
-        f"  Face at ({face_x},{face_y}) {face_w}x{face_h}px  →  crop ({left},{top}) {crop_w}x{crop_h}px"
+        f"  Face at ({face.x},{face.y}) {face.w}x{face.h}px  →  "
+        f"crop ({box.left},{box.top}) {box.width}x{box.height}px"
     )
 
-    cropped = image.crop((left, top, right, bottom))
+    cropped = image.crop(box.as_tuple())
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -149,7 +177,7 @@ def process_image(input_path: Path, output_path: Path):
     return True
 
 
-def main():
+def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Detect faces and crop to head+shoulders.")
@@ -168,7 +196,7 @@ def main():
     output_dir = Path(args.output_dir)
 
     if not input_dir.exists():
-        print(f"Error: '{input_dir}' directory not found.")
+        print(f"Error: '{input_dir}' directory not found.", file=sys.stderr)
         sys.exit(1)
 
     output_dir.mkdir(exist_ok=True)
@@ -190,8 +218,10 @@ def main():
                 print(f"  Saved → {out_path}\n")
             else:
                 print()
+        except ImageCropperError as e:
+            print(f"  [!] {e}\n")
         except Exception as e:
-            print(f"  [!] Error: {e}\n")
+            print(f"  [!] unexpected error: {e}\n", file=sys.stderr)
 
     print(f"Done. {ok}/{len(images)} image(s) processed.")
 

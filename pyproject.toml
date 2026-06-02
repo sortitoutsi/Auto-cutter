@@ -157,29 +157,40 @@ disallow_untyped_defs = true
 warn_return_any = true
 no_implicit_optional = true
 
+[[tool.mypy.overrides]]
+module = "image_cropper.pipeline.align"
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
+
 # Modules pending Phase 4 conversion: skip type checking until they're
 # refactored to use the new value objects + validators. Each entry below
 # is removed (and replaced with strict-mode opt-in above) as its
 # corresponding module is converted.
-[[tool.mypy.overrides]]
-module = "image_cropper.pipeline.align"
-ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.crop_source"
-ignore_errors = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.crop_cutout"
-ignore_errors = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.deglow"
-ignore_errors = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.remove_background"
-ignore_errors = true
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 module = "image_cropper.pipeline.download_queue"

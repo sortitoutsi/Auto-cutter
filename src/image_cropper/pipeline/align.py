@@ -3,31 +3,38 @@
 Eye aligner: rotates images so both eyes are on the same horizontal line.
 
 Usage:
-  python align_eyes.py                        # input/ → output_aligned/
-  python align_eyes.py src/ out/              # custom dirs
-  python align_eyes.py src/ out/ --debug      # also writes debug overlays to out/debug/
+  python -m image_cropper.pipeline.align                        # input/ → output/aligned/
+  python -m image_cropper.pipeline.align src/ out/              # custom dirs
+  python -m image_cropper.pipeline.align src/ out/ --debug      # also writes debug overlays
 """
 
+from __future__ import annotations
+
 import argparse
+import contextlib
 import math
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from image_cropper.errors import DetectionError, ImageCropperError
 from image_cropper.models import dlib_model_path, face_landmarker_path
+from image_cropper.types import EyeDetection, Point2D
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+SUPPORTED_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
-# MediaPipe iris landmark indices (requires output_face_blendshapes=False, output_facial_transformation_matrixes=False)
-# Landmarks 468-472: left iris, 473-477: right iris (center is 468 and 473)
-_LEFT_IRIS_IDX = [468, 469, 470, 471, 472]
-_RIGHT_IRIS_IDX = [473, 474, 475, 476, 477]
+# MediaPipe iris landmark indices. Landmarks 468-472: left iris,
+# 473-477: right iris (center is 468 and 473).
+_LEFT_IRIS_IDX: list[int] = [468, 469, 470, 471, 472]
+_RIGHT_IRIS_IDX: list[int] = [473, 474, 475, 476, 477]
 
 # dlib eye landmark indices in the 68-point model
-_DLIB_LEFT_EYE = list(range(36, 42))
-_DLIB_RIGHT_EYE = list(range(42, 48))
+_DLIB_LEFT_EYE: list[int] = list(range(36, 42))
+_DLIB_RIGHT_EYE: list[int] = list(range(42, 48))
 
 
 def ensure_landmarker() -> bool:
@@ -38,16 +45,18 @@ def ensure_dlib_model() -> bool:
     return dlib_model_path().exists()
 
 
-def _centroid(points) -> tuple[float, float]:
+def _centroid(points: Sequence[tuple[float, float]]) -> Point2D:
     arr = np.array(points)
     return float(arr[:, 0].mean()), float(arr[:, 1].mean())
 
 
-def detect_eyes_landmarker(image_rgb: np.ndarray):
-    """
-    Uses MediaPipe Face Landmarker with iris refinement.
-    Returns (left_eye, right_eye, detector_name) or None.
-    """
+def _order_left_right(a: Point2D, b: Point2D) -> tuple[Point2D, Point2D]:
+    """Return (left, right) so left.x <= right.x."""
+    return (a, b) if a[0] <= b[0] else (b, a)
+
+
+def detect_eyes_landmarker(image_rgb: np.ndarray) -> EyeDetection | None:
+    """MediaPipe Face Landmarker with iris refinement."""
     import mediapipe as mp
     from mediapipe.tasks import python as mp_tasks
     from mediapipe.tasks.python import vision as mp_vision
@@ -73,13 +82,12 @@ def detect_eyes_landmarker(image_rgb: np.ndarray):
     lms = result.face_landmarks[0]
     total = len(lms)
 
-    # Use iris landmarks if present (requires 478+ points)
     if total >= 478:
         left_pts = [(lms[i].x * w, lms[i].y * h) for i in _LEFT_IRIS_IDX if i < total]
         right_pts = [(lms[i].x * w, lms[i].y * h) for i in _RIGHT_IRIS_IDX if i < total]
         label = "MediaPipe Iris"
     else:
-        # Fall back to eye-contour landmarks (indices 33, 133 for left; 362, 263 for right)
+        # Eye-contour fallback (no iris landmarks)
         left_pts = [
             (lms[i].x * w, lms[i].y * h) for i in [33, 133, 160, 158, 144, 153] if i < total
         ]
@@ -91,21 +99,12 @@ def detect_eyes_landmarker(image_rgb: np.ndarray):
     if not left_pts or not right_pts:
         return None
 
-    left_eye = _centroid(left_pts)
-    right_eye = _centroid(right_pts)
-
-    # Ensure left is on the left side of the image
-    if left_eye[0] > right_eye[0]:
-        left_eye, right_eye = right_eye, left_eye
-
-    return left_eye, right_eye, label
+    left, right = _order_left_right(_centroid(left_pts), _centroid(right_pts))
+    return EyeDetection(left_eye=left, right_eye=right, detector_name=label)
 
 
-def detect_eyes_dlib(image_rgb: np.ndarray):
-    """
-    dlib 68-point landmark detector. Averages all eye-ring landmarks for each eye.
-    Returns (left_eye, right_eye, detector_name) or None.
-    """
+def detect_eyes_dlib(image_rgb: np.ndarray) -> EyeDetection | None:
+    """dlib 68-point landmark detector. Averages eye-ring landmarks."""
     import cv2
     import dlib
 
@@ -121,16 +120,14 @@ def detect_eyes_dlib(image_rgb: np.ndarray):
     shape = predictor(gray, det)
     pts = [(shape.part(i).x, shape.part(i).y) for i in range(68)]
 
-    left_eye = _centroid([pts[i] for i in _DLIB_LEFT_EYE])
-    right_eye = _centroid([pts[i] for i in _DLIB_RIGHT_EYE])
-
-    if left_eye[0] > right_eye[0]:
-        left_eye, right_eye = right_eye, left_eye
-
-    return left_eye, right_eye, "dlib 68-point"
+    left, right = _order_left_right(
+        _centroid([pts[i] for i in _DLIB_LEFT_EYE]),
+        _centroid([pts[i] for i in _DLIB_RIGHT_EYE]),
+    )
+    return EyeDetection(left_eye=left, right_eye=right, detector_name="dlib 68-point")
 
 
-def detect_eyes_opencv(image_rgb: np.ndarray):
+def detect_eyes_opencv(image_rgb: np.ndarray) -> EyeDetection | None:
     """Last-resort: Haar cascade eye detector."""
     import cv2
 
@@ -155,17 +152,18 @@ def detect_eyes_opencv(image_rgb: np.ndarray):
     eyes = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[:2]
     centers = [(fx + ex + ew // 2, fy + ey + eh // 2) for ex, ey, ew, eh in eyes]
     centers.sort(key=lambda c: c[0])
-    left_eye, right_eye = centers
-    return (
-        (float(left_eye[0]), float(left_eye[1])),
-        (float(right_eye[0]), float(right_eye[1])),
-        "OpenCV Haar",
+    left, right = (
+        (float(centers[0][0]), float(centers[0][1])),
+        (
+            float(centers[1][0]),
+            float(centers[1][1]),
+        ),
     )
+    return EyeDetection(left_eye=left, right_eye=right, detector_name="OpenCV Haar")
 
 
-def detect_eyes(image_rgb: np.ndarray):
+def detect_eyes(image_rgb: np.ndarray) -> EyeDetection | None:
     """Try MediaPipe Landmarker → dlib → OpenCV Haar."""
-    # --- MediaPipe Face Landmarker ---
     if face_landmarker_path().exists():
         try:
             result = detect_eyes_landmarker(image_rgb)
@@ -175,7 +173,6 @@ def detect_eyes(image_rgb: np.ndarray):
         except Exception as e:
             print(f"  [!] MediaPipe Landmarker failed ({e}), trying dlib...")
 
-    # --- dlib ---
     if dlib_model_path().exists():
         try:
             result = detect_eyes_dlib(image_rgb)
@@ -185,24 +182,26 @@ def detect_eyes(image_rgb: np.ndarray):
         except Exception as e:
             print(f"  [!] dlib failed ({e}), trying OpenCV Haar...")
 
-    # --- OpenCV Haar ---
     return detect_eyes_opencv(image_rgb)
 
 
-def compute_rotation_angle(left_eye, right_eye) -> float:
+def compute_rotation_angle(left_eye: Point2D, right_eye: Point2D) -> float:
+    """Angle (degrees) between the eye line and the horizontal, in [-180, 180]."""
     dx = right_eye[0] - left_eye[0]
     dy = right_eye[1] - left_eye[1]
-    return math.degrees(math.atan2(dy, dx))
+    angle = math.degrees(math.atan2(dy, dx))
+    assert -180.0 <= angle <= 180.0, f"angle out of range: {angle}"
+    return angle
 
 
 def save_debug_overlay(
     image: Image.Image,
-    left_eye,
-    right_eye,
+    left_eye: Point2D,
+    right_eye: Point2D,
     angle: float,
     detector_name: str,
     debug_path: Path,
-):
+) -> None:
     overlay = image.convert("RGBA")
     draw = ImageDraw.Draw(overlay, "RGBA")
 
@@ -241,6 +240,7 @@ def save_debug_overlay(
     )
 
     font_size = max(16, int(min(w, h) * 0.025))
+    font: Any
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
     except Exception:
@@ -255,7 +255,7 @@ def save_debug_overlay(
     pad = font_size // 2
     box_h = (font_size + 4) * len(lines) + pad * 2
     box_w = max(len(line) for line in lines) * (font_size // 2) + pad * 2
-    draw.rectangle([(0, 0), (box_w, box_h)], fill=(0, 0, 0, 160))
+    draw.rectangle((0, 0, box_w, box_h), fill=(0, 0, 0, 160))
     for i, line in enumerate(lines):
         draw.text((pad, pad + i * (font_size + 4)), line, fill=(255, 255, 255, 255), font=font)
 
@@ -263,43 +263,51 @@ def save_debug_overlay(
     overlay.convert("RGB").save(debug_path, quality=92, subsampling=0)
 
 
-def process_image(input_path: Path, output_path: Path, debug_dir: Path | None = None):
+def process_image(
+    input_path: Path,
+    output_path: Path,
+    debug_dir: Path | None = None,
+) -> bool:
+    """Align a single image. Raises DetectionError if eyes cannot be located."""
     image = Image.open(input_path)
-    try:
+    with contextlib.suppress(Exception):
         from PIL import ImageOps
 
         image = ImageOps.exif_transpose(image)
-    except Exception:
-        pass
 
     img_rgb = np.array(image.convert("RGB"))
 
     detection = detect_eyes(img_rgb)
     if detection is None:
-        print(f"  [!] Could not detect eyes — skipping {input_path.name}")
-        return False
+        raise DetectionError(f"could not detect eyes in {input_path.name}")
 
-    left_eye, right_eye, detector_name = detection
-    angle = compute_rotation_angle(left_eye, right_eye)
+    angle = compute_rotation_angle(detection.left_eye, detection.right_eye)
 
     print(
-        f"  [{detector_name}]  "
-        f"Left eye ({left_eye[0]:.1f}, {left_eye[1]:.1f})  "
-        f"Right eye ({right_eye[0]:.1f}, {right_eye[1]:.1f})  "
+        f"  [{detection.detector_name}]  "
+        f"Left eye ({detection.left_eye[0]:.1f}, {detection.left_eye[1]:.1f})  "
+        f"Right eye ({detection.right_eye[0]:.1f}, {detection.right_eye[1]:.1f})  "
         f"→  rotate {-angle:.2f}°"
     )
 
     if debug_dir is not None:
         debug_path = debug_dir / (input_path.stem + "_debug.jpg")
-        save_debug_overlay(image, left_eye, right_eye, angle, detector_name, debug_path)
+        save_debug_overlay(
+            image,
+            detection.left_eye,
+            detection.right_eye,
+            angle,
+            detection.detector_name,
+            debug_path,
+        )
         print(f"  Debug   → {debug_path}")
 
     if abs(angle) < 0.1:
         print("  Eyes already level — copying without rotation.")
         rotated = image
     else:
-        cx = (left_eye[0] + right_eye[0]) / 2
-        cy = (left_eye[1] + right_eye[1]) / 2
+        cx = (detection.left_eye[0] + detection.right_eye[0]) / 2
+        cy = (detection.left_eye[1] + detection.right_eye[1]) / 2
         rotated = image.rotate(-angle, resample=Image.BICUBIC, expand=True, center=(cx, cy))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,7 +325,7 @@ def process_image(input_path: Path, output_path: Path, debug_dir: Path | None = 
     return True
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Align images so eyes are level.")
     parser.add_argument(
         "input_dir", nargs="?", default="input", help="Input directory (default: input)"
@@ -338,7 +346,7 @@ def main():
     debug_dir = output_dir / "debug" if args.debug else None
 
     if not input_dir.exists():
-        print(f"Error: '{input_dir}' directory not found.")
+        print(f"Error: '{input_dir}' directory not found.", file=sys.stderr)
         sys.exit(1)
 
     output_dir.mkdir(exist_ok=True)
@@ -361,8 +369,10 @@ def main():
                 print(f"  Saved   → {out_path}\n")
             else:
                 print()
+        except ImageCropperError as e:
+            print(f"  [!] {e}\n")
         except Exception as e:
-            print(f"  [!] Error: {e}\n")
+            print(f"  [!] unexpected error: {e}\n", file=sys.stderr)
 
     print(f"Done. {ok}/{len(images)} image(s) aligned.")
 
