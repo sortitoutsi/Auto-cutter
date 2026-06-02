@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full image processing pipeline:
-#   download → align eyes → crop faces → remove background → crop portrait → deglow
+#   download → align eyes → crop faces → remove background → crop portrait → deglow → center on canvas
 #
 # Usage:
 #   SITSI_COOKIE="..." ./pipeline.sh           # download + process
@@ -37,6 +37,7 @@ TMP_ALIGNED="$TMP_DIR/aligned"
 TMP_CROPPED="$TMP_DIR/cropped"
 TMP_TRANSPARENT="$TMP_DIR/transparent"
 TMP_PORTRAIT="$TMP_DIR/portrait"
+TMP_DEGLOWED="$TMP_DIR/deglowed"
 OUTPUT_DIR="$SCRIPT_DIR/output/final"
 
 cleanup() {
@@ -51,7 +52,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP_ALIGNED" "$TMP_CROPPED" "$TMP_TRANSPARENT" "$TMP_PORTRAIT" "$OUTPUT_DIR"
+mkdir -p "$TMP_ALIGNED" "$TMP_CROPPED" "$TMP_TRANSPARENT" "$TMP_PORTRAIT" "$TMP_DEGLOWED" "$OUTPUT_DIR"
 
 # --- venv setup ---
 echo "=== Setting up virtual environment ==="
@@ -80,7 +81,7 @@ echo "Venv ready."
 # --- step 1: download ---
 if [[ $SKIP_DOWNLOAD -eq 0 ]]; then
     echo ""
-    echo "=== Step 1/6: Downloading images ==="
+    echo "=== Step 1/7: Downloading images ==="
     if [[ -z "${SITSI_COOKIE:-}" ]]; then
         echo "ERROR: SITSI_COOKIE is not set." >&2
         echo "Export it before running: SITSI_COOKIE='...' ./pipeline.sh" >&2
@@ -90,35 +91,40 @@ if [[ $SKIP_DOWNLOAD -eq 0 ]]; then
     INPUT_DIR="$SCRIPT_DIR/input"
 else
     echo ""
-    echo "=== Step 1/6: Skipping download, using $INPUT_DIR ==="
+    echo "=== Step 1/7: Skipping download, using $INPUT_DIR ==="
 fi
 
 # --- step 2: align eyes ---
 echo ""
-echo "=== Step 2/6: Aligning eyes ==="
+echo "=== Step 2/7: Aligning eyes ==="
 "$PYTHON" -m image_cropper.pipeline.align "$INPUT_DIR" "$TMP_ALIGNED"
 
 # --- step 3: crop faces ---
 echo ""
-echo "=== Step 3/6: Cropping faces ==="
+echo "=== Step 3/7: Cropping faces ==="
 "$PYTHON" -m image_cropper.pipeline.crop_source "$TMP_ALIGNED" "$TMP_CROPPED"
 
 # --- step 4: remove background ---
 echo ""
-echo "=== Step 4/6: Removing backgrounds ==="
+echo "=== Step 4/7: Removing backgrounds ==="
 "$PYTHON" -m image_cropper.pipeline.remove_background \
     --input "$TMP_CROPPED" \
     --output "$TMP_TRANSPARENT"
 
 # --- step 5: crop portrait ---
 echo ""
-echo "=== Step 5/6: Cropping to portrait (250×250) ==="
+echo "=== Step 5/7: Cropping to portrait (250×250) ==="
 "$PYTHON" -m image_cropper.pipeline.crop_cutout "$TMP_TRANSPARENT" "$TMP_PORTRAIT"
 
 # --- step 6: deglow ---
 echo ""
-echo "=== Step 6/6: Removing glow/halo ==="
-"$PYTHON" -m image_cropper.pipeline.deglow "$TMP_PORTRAIT" "$OUTPUT_DIR" --overwrite
+echo "=== Step 6/7: Removing glow/halo ==="
+"$PYTHON" -m image_cropper.pipeline.deglow "$TMP_PORTRAIT" "$TMP_DEGLOWED" --overwrite
+
+# --- step 7: center on canvas ---
+echo ""
+echo "=== Step 7/7: Centering on canvas ==="
+"$PYTHON" -m image_cropper.pipeline.finalize_cutout "$TMP_DEGLOWED" "$OUTPUT_DIR"
 
 echo ""
 echo "=== Pipeline complete ==="

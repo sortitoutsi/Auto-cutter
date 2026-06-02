@@ -62,13 +62,14 @@ SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 DEFAULT_OUTPUT_DIR = Path.home() / "image-cropper-output"
 
 # ── pipeline step definitions ──────────────────────────────────────────────────
-STEPS = ["align", "crop_face", "remove_bg", "crop_portrait", "deglow"]
+STEPS = ["align", "crop_face", "remove_bg", "crop_portrait", "deglow", "center"]
 STEP_LABEL = {
     "align": "1. Align Eyes",
     "crop_face": "2. Crop Face",
     "remove_bg": "3. Remove Background",
     "crop_portrait": "4. Crop Portrait",
     "deglow": "5. Deglow",
+    "center": "6. Center on Canvas",
 }
 # Module names — invoked via `python -m image_cropper.pipeline.<module>`
 STEP_MODULE = {
@@ -77,6 +78,7 @@ STEP_MODULE = {
     "remove_bg": "image_cropper.pipeline.remove_background",
     "crop_portrait": "image_cropper.pipeline.crop_cutout",
     "deglow": "image_cropper.pipeline.deglow",
+    "center": "image_cropper.pipeline.finalize_cutout",
 }
 
 STATUS_PENDING = "pending"
@@ -235,6 +237,8 @@ class PipelineWorker(QThread):
             cmd = base_cmd + [str(tmp_in), str(out_dir), "--chin-pixels", str(self.chin_pixels)]
         elif step == "deglow":
             cmd = base_cmd + [str(tmp_in), str(out_dir), "--overwrite"]
+        elif step == "center":
+            cmd = base_cmd + [str(tmp_in), str(out_dir)]
         else:
             return False, None, None
 
@@ -896,7 +900,7 @@ class MainWindow(QMainWindow):
         out_dir = Path(self._output_edit.text())
         copied = 0
         for entry in self._entries:
-            src = entry.outputs.get("deglow")
+            src = entry.outputs.get("center") or entry.outputs.get("deglow")
             if src and src.exists():
                 out_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, out_dir / src.name)

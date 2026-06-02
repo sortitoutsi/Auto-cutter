@@ -15,7 +15,7 @@ SITSI_COOKIE="…" ./pipeline.sh [options]
 
 The pipeline:
 1. Creates a throwaway venv in `tmp_pipeline/.venv`, installs `requirements.txt`
-2. Runs all 6 steps in sequence
+2. Runs all 7 steps in sequence
 3. Writes final PNGs to `output/final/`
 4. Removes `tmp_pipeline/` and the downloaded `input/` on exit (success or failure)
 
@@ -162,13 +162,21 @@ hair gets maximum correction, blond/pale subjects get a gentler touch.
 
 ---
 
-### finalize-cutout.py
+### finalize_cutout.py
 
-Utility script: centers an existing cutout PNG onto a fresh 250×250
-transparent canvas. Useful for hand-edited cutouts that need re-centering.
+Centers the non-transparent content of a cutout PNG onto a fresh 250×250
+transparent canvas. Crops the tight bounding box, scales down if larger than
+250×250, then pastes it centered.
 
 ```bash
-python finalize-cutout.py <input> [output]
+python finalize_cutout.py <input> [output]
 ```
 
 `input` can be a single PNG or a directory of PNGs.
+
+| Argument | Default |
+|---|---|
+| `input` | _(required)_ |
+| `output` | `<input_dir>_finalized/` (directory) or `<stem>_final.png` (file) |
+
+Fully transparent images are skipped.
