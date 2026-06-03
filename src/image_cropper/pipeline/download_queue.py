@@ -48,7 +48,7 @@ from image_cropper.sitsi_client import (
 )
 from image_cropper.types import QueueEntry, SubmissionMeta
 
-INPUT_DIR: Path = Path(__file__).parent.parent.parent.parent / "input"
+INPUT_DIR: Path = Path(os.environ.get("SITSI_INPUT_DIR", str(Path.home() / "image-cropper-output" / "input")))
 MAX_IMAGES: int = 50
 
 QUEUE_URL: str = (
