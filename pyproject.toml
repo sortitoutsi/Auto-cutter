@@ -84,6 +84,7 @@ ic-remove-bg     = "image_cropper.pipeline.remove_background:main"
 ic-crop-portrait = "image_cropper.pipeline.crop_cutout:main"
 ic-deglow        = "image_cropper.pipeline.deglow:main"
 ic-center        = "image_cropper.pipeline.finalize_cutout:main"
+ic-submit        = "image_cropper.pipeline.submit_cutout:main"
 ic-download      = "image_cropper.pipeline.download_queue:main"
 
 [project.urls]
