@@ -33,6 +33,9 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QGroupBox,
@@ -51,6 +54,16 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from image_cropper.errors import ValidationError
+from image_cropper.pipeline.download_queue import (
+    collect_collection_entries,
+    collect_image_entries,
+    guess_extension,
+    safe_filename,
+)
+from image_cropper.pipeline.submit_cutout import load_metadata, submit_cutout
+from image_cropper.sitsi_client import get_session, validate_cookie_string, validate_image_url
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 PYTHON = sys.executable  # GUI must be launched from the same venv as the scripts
@@ -105,6 +118,15 @@ STATUS_COLOR = {
 
 # ── image entry ────────────────────────────────────────────────────────────────
 class ImageEntry:
+    """Per-image state container for one loaded image.
+
+    Tracks the original source path, the output file produced by each completed
+    pipeline step, the per-step status strings, and the optional eye-alignment
+    debug overlay.  One ImageEntry is created for every file the user loads;
+    the GUI list widget holds a reference and updates the entry in-place as
+    steps complete.
+    """
+
     def __init__(self, path: Path):
         self.original = path
         self.name = path.name
@@ -125,6 +147,27 @@ class ImageEntry:
 
 # ── worker thread ──────────────────────────────────────────────────────────────
 class PipelineWorker(QThread):
+    """Background thread that runs pipeline steps for a batch of images.
+
+    Each step is executed by spawning a subprocess running
+    ``python -m image_cropper.pipeline.<module>``.  Subprocess isolation means
+    GPU/ML memory is released after every step and a crash in one step cannot
+    corrupt the GUI process.
+
+    Input chaining: for each image the worker walks backwards through earlier
+    steps to find the most recent output and feeds it as input to the next
+    step.  This allows non-consecutive step selections (e.g. running only
+    steps 4 and 6) to work without requiring every intermediate step to have
+    completed first.
+
+    Signals:
+        log (str): Human-readable line to append to the UI log pane.
+        progress (int, int): ``(current, total)`` task counts for the progress bar.
+        image_step_done (str, str, str): ``(image_name, step_id, status)`` — emitted
+            once per image per step so list-item icons update immediately.
+        finished_all: Emitted once all images and steps have been processed.
+    """
+
     log = Signal(str)
     progress = Signal(int, int)  # current, total
     image_step_done = Signal(str, str, str)  # image_name, step, status
@@ -165,20 +208,23 @@ class PipelineWorker(QThread):
                 if self._cancelled:
                     break
 
-                # Determine input for this step
+                # Determine input for this step.
+                # Walk backward through all earlier steps to find the most
+                # recent available output; fall back to the original image so
+                # that non-consecutive step selections (e.g. steps 4 + 6 on an
+                # already-transparent image) work without requiring every
+                # intermediate step to have run first.
                 if step == "align":
                     in_path = entry.original
                 else:
-                    prev_step = STEPS[STEPS.index(step) - 1]
-                    if prev_step in entry.outputs and entry.outputs[prev_step].exists():
-                        in_path = entry.outputs[prev_step]
-                    else:
-                        self.log.emit(f"  [{entry.name}] previous step output missing — skipping")
-                        entry.statuses[step] = STATUS_SKIPPED
-                        self.image_step_done.emit(entry.name, step, STATUS_SKIPPED)
-                        done += 1
-                        self.progress.emit(done, total)
-                        continue
+                    step_idx = STEPS.index(step)
+                    in_path = None
+                    for prev in reversed(STEPS[:step_idx]):
+                        if prev in entry.outputs and entry.outputs[prev].exists():
+                            in_path = entry.outputs[prev]
+                            break
+                    if in_path is None:
+                        in_path = entry.original
 
                 entry.statuses[step] = STATUS_RUNNING
                 self.image_step_done.emit(entry.name, step, STATUS_RUNNING)
@@ -302,8 +348,145 @@ class PipelineWorker(QThread):
         return tmp_dir
 
 
+# ── submit worker ──────────────────────────────────────────────────────────────
+class SubmitWorker(QThread):
+    """Background thread that posts a finished cutout to sortitoutsi.net.
+
+    Calls ``submit_cutout()`` from ``pipeline.submit_cutout`` and emits
+    ``finished`` with the result.  Running in a thread keeps the GUI
+    responsive during the HTTP round-trip.
+
+    Signals:
+        log (str): Progress / error lines for the UI log pane.
+        finished (bool, str): ``(ok, message)`` — True on success; message
+            contains a human-readable summary and, on success, the submission URL.
+    """
+
+    log = Signal(str)
+    finished = Signal(bool, str)  # ok, message
+
+    def __init__(self, image_path: Path, submission_id: int, cookie_str: str, parent=None):
+        super().__init__(parent)
+        self.image_path = image_path
+        self.submission_id = submission_id
+        self.cookie_str = cookie_str
+
+    def run(self):
+        try:
+            session = get_session(self.cookie_str)
+            result = submit_cutout(session, self.image_path, self.submission_id)
+            if result["ok"]:
+                msg = result["message"]
+                if result["submission_url"]:
+                    msg += f"\n{result['submission_url']}"
+                self.finished.emit(True, msg)
+            else:
+                self.finished.emit(False, result["message"])
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+# ── download worker ────────────────────────────────────────────────────────────
+class DownloadWorker(QThread):
+    """Background thread that scrapes and downloads source images from sortitoutsi.net.
+
+    Routes automatically based on the URL:
+    - URLs containing ``/queue`` use ``collect_image_entries()`` (no auth needed).
+    - Other URLs use ``collect_collection_entries()`` (requires session cookie).
+
+    A ``.sitsi.json`` sidecar is written next to every downloaded image so
+    ``submit_cutout()`` can post the finished cutout back without the user
+    re-entering the submission ID.
+
+    Signals:
+        log (str): Progress / error lines for the UI log pane.
+        progress (int, int): ``(done, total)`` for the progress bar.
+        finished (int, str): ``(count_downloaded, output_dir_path)``.
+    """
+
+    log = Signal(str)
+    progress = Signal(int, int)   # done, total
+    finished = Signal(int, str)   # count downloaded, out_dir path
+
+    def __init__(
+        self,
+        source_url: str,
+        out_dir: Path,
+        cookie_str: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.source_url = source_url
+        self.cookie_str = cookie_str
+        self.out_dir = out_dir
+
+    def run(self):
+        import json
+        import time
+
+        try:
+            session = get_session(self.cookie_str)  # empty string → unauthenticated
+
+            is_queue = "/queue" in self.source_url
+            if is_queue:
+                self.log.emit("Fetching queue…")
+                pairs = collect_image_entries(session, self.source_url)
+            else:
+                self.log.emit("Scraping collection…")
+                pairs = collect_collection_entries(session, self.source_url)
+
+            if not pairs:
+                self.log.emit("  No downloadable source images found.")
+                self.finished.emit(0, str(self.out_dir))
+                return
+
+            entries = [p[0] for p in pairs]
+            metas = [p[1] for p in pairs]
+            self.log.emit(f"  Found {len(entries)} source image(s). Downloading…")
+            self.progress.emit(0, len(entries))
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+
+            ok = 0
+            for i, (entry, meta) in enumerate(zip(entries, metas, strict=True), 1):
+                url = entry["url"]
+                alt = entry["alt"]
+                try:
+                    validate_image_url(url)
+                    resp = session.get(url, timeout=60, stream=True)
+                    resp.raise_for_status()
+                    ext = guess_extension(url, resp.headers.get("Content-Type", ""))
+                    base = safe_filename(alt)
+                    filename = base if base.lower().endswith(ext.lower()) else base + ext
+                    dest = self.out_dir / filename
+                    if dest.exists():
+                        dest = self.out_dir / f"{Path(filename).stem}_{i}{ext}"
+                    with open(dest, "wb") as f:
+                        for chunk in resp.iter_content(8192):
+                            f.write(chunk)
+                    sidecar = dest.with_suffix(".sitsi.json")
+                    sidecar.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+                    self.log.emit(f"  [{i}/{len(entries)}] {dest.name}")
+                    ok += 1
+                except Exception as e:
+                    self.log.emit(f"  [{i}/{len(entries)}] ERROR {alt}: {e}")
+                self.progress.emit(i, len(entries))
+                time.sleep(0.2)
+
+            self.finished.emit(ok, str(self.out_dir))
+        except Exception as e:
+            self.log.emit(f"  Download error: {e}")
+            self.finished.emit(0, str(self.out_dir))
+
+
 # ── image list item ────────────────────────────────────────────────────────────
 class ImageListItem(QListWidgetItem):
+    """List widget item displaying an image thumbnail and per-step status icons.
+
+    The second text line shows one STATUS_ICON symbol per pipeline step in
+    order: ○ pending / ⟳ running / ✓ done / ⊘ skipped / ✗ error.
+    Call ``_update()`` after mutating ``entry.statuses`` to refresh the display.
+    """
+
     def __init__(self, entry: ImageEntry):
         super().__init__()
         self.entry = entry
@@ -322,6 +505,13 @@ class ImageListItem(QListWidgetItem):
 
 # ── preview widget ─────────────────────────────────────────────────────────────
 class ImagePreview(QLabel):
+    """QLabel that scales a QPixmap to fill its current size while preserving aspect ratio.
+
+    Call ``set_image(path)`` to load a new image.  The pixmap is re-scaled
+    automatically on every ``resizeEvent`` so the preview always fills the
+    available space without cropping.
+    """
+
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -361,6 +551,16 @@ class ImagePreview(QLabel):
 
 # ── step row widget ────────────────────────────────────────────────────────────
 class StepRow(QWidget):
+    """One row in the pipeline panel: a checkbox (include in batch) and a Run button.
+
+    The checkbox controls whether the step is included when the user clicks
+    "Run Checked Steps".  The Run button immediately runs *only* this step on
+    all loaded images, regardless of which checkboxes are ticked.
+
+    Signals:
+        run_requested (str): Emitted with the step ID when Run is clicked.
+    """
+
     run_requested = Signal(str)  # step id
 
     def __init__(self, step_id: str, parent=None):
@@ -386,6 +586,24 @@ class StepRow(QWidget):
 
 # ── main window ────────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
+    """Main application window.
+
+    Layout (horizontal splitter):
+      - Left  : image list (ImageListItem rows with thumbnail icons)
+      - Centre: preview area with Original / Debug (align overlay) / Latest Output toggle
+      - Right : pipeline panel (StepRow widgets, Run / Cancel / Submit buttons)
+
+    Below the splitter: a progress bar and a scrollable log pane.
+
+    Key state:
+        _entries (list[ImageEntry]): All loaded images, one entry per file.
+        _session_dir (Path): Throwaway temp directory for intermediate step
+            outputs created at startup and deleted on window close.
+        _worker (PipelineWorker | None): Currently running pipeline worker.
+        _current_entry (ImageEntry | None): Image selected in the list.
+        _preview_mode (str): One of ``"original"``, ``"debug"``, ``"output"``.
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Cropper")
@@ -395,6 +613,9 @@ class MainWindow(QMainWindow):
         self._entries: list[ImageEntry] = []
         self._session_dir = Path(tempfile.mkdtemp(prefix="imgcrop_"))
         self._worker: PipelineWorker | None = None
+        self._submit_worker: SubmitWorker | None = None
+        self._download_worker: DownloadWorker | None = None
+        self._last_collection_url: str = ""  # last manually-entered collection URL
         self._current_entry: ImageEntry | None = None
         self._preview_mode = "original"  # original | debug | output
 
@@ -412,6 +633,9 @@ class MainWindow(QMainWindow):
 
         # Toolbar row
         root.addLayout(self._build_toolbar())
+
+        # Queue filter row
+        root.addLayout(self._build_queue_filters())
 
         # Main splitter: image list | preview | pipeline
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -443,6 +667,10 @@ class MainWindow(QMainWindow):
         add_folder_btn.clicked.connect(self._add_folder)
         row.addWidget(add_folder_btn)
 
+        dl_btn = QPushButton("↓ Download from sortitoutsi")
+        dl_btn.clicked.connect(self._show_download_dialog)
+        row.addWidget(dl_btn)
+
         clear_btn = QPushButton("✕ Clear All")
         clear_btn.clicked.connect(self._clear_all)
         row.addWidget(clear_btn)
@@ -459,6 +687,50 @@ class MainWindow(QMainWindow):
         browse_btn.clicked.connect(self._browse_output)
         row.addWidget(browse_btn)
 
+        row.addSpacing(12)
+        row.addWidget(QLabel("Cookie:"))
+        self._cookie_edit = QLineEdit()
+        self._cookie_edit.setPlaceholderText("sortitoutsi_session=<value> (paste from browser)")
+        self._cookie_edit.setMinimumWidth(200)
+        self._cookie_edit.setText(os.environ.get("SITSI_COOKIE", ""))
+        row.addWidget(self._cookie_edit)
+
+        return row
+
+    def _build_queue_filters(self) -> QHBoxLayout:
+        """Build the queue filter row: status, sort, submitter ID, and refresh button."""
+        row = QHBoxLayout()
+        row.setSpacing(6)
+
+        row.addWidget(QLabel("Queue:"))
+
+        self._status_combo = QComboBox()
+        self._status_combo.addItem("Pending", "pending")
+        self._status_combo.addItem("In Progress", "in_progress")
+        self._status_combo.addItem("Completed", "completed")
+        self._status_combo.addItem("Rejected", "rejected")
+        self._status_combo.setToolTip("Filter by submission status")
+        row.addWidget(self._status_combo)
+
+        self._sort_combo = QComboBox()
+        self._sort_combo.addItem("Newest first", "submitted_at-desc")
+        self._sort_combo.addItem("Oldest first", "submitted_at-asc")
+        self._sort_combo.setToolTip("Sort order")
+        row.addWidget(self._sort_combo)
+
+        row.addWidget(QLabel("By user:"))
+        self._submitter_edit = QLineEdit()
+        self._submitter_edit.setPlaceholderText("user ID (optional)")
+        self._submitter_edit.setFixedWidth(110)
+        self._submitter_edit.setToolTip("Filter by submitter user ID (leave blank for all)")
+        row.addWidget(self._submitter_edit)
+
+        refresh_btn = QPushButton("↻ Refresh Queue")
+        refresh_btn.setToolTip("Fetch queue with current filters and download to output dir")
+        refresh_btn.clicked.connect(self._auto_fetch_queue)
+        row.addWidget(refresh_btn)
+
+        row.addStretch()
         return row
 
     def _build_image_list(self) -> QWidget:
@@ -572,6 +844,24 @@ class MainWindow(QMainWindow):
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._cancel_worker)
         layout.addWidget(self._cancel_btn)
+
+        layout.addSpacing(8)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color: #444;")
+        layout.addWidget(sep2)
+
+        layout.addSpacing(4)
+
+        self._submit_btn = QPushButton("Submit to sortitoutsi")
+        self._submit_btn.setEnabled(False)
+        self._submit_btn.setToolTip(
+            "Post the finished cutout back to sortitoutsi.net.\n"
+            "Requires: center step done + sidecar metadata + session cookie."
+        )
+        self._submit_btn.clicked.connect(self._submit_current)
+        layout.addWidget(self._submit_btn)
 
         layout.addStretch()
 
@@ -771,6 +1061,7 @@ class MainWindow(QMainWindow):
         self._current_entry = current.entry
         self._update_preview()
         self._update_step_statuses()
+        self._refresh_submit_btn()
 
     def _set_preview_mode(self, mode: str):
         self._preview_mode = mode
@@ -822,6 +1113,7 @@ class MainWindow(QMainWindow):
         self._start_worker(self._entries, [step])
 
     def _run_checked_steps_selected(self):
+        """Run all checked pipeline steps on the currently selected image only."""
         if not self._current_entry:
             self._log_msg("No image selected.")
             return
@@ -832,6 +1124,7 @@ class MainWindow(QMainWindow):
         self._start_worker([self._current_entry], steps)
 
     def _run_checked_steps_all(self):
+        """Run all checked pipeline steps on every loaded image in batch."""
         if not self._entries:
             self._log_msg("No images loaded.")
             return
@@ -842,6 +1135,7 @@ class MainWindow(QMainWindow):
         self._start_worker(self._entries, steps)
 
     def _start_worker(self, entries: list[ImageEntry], steps: list[str]):
+        """Instantiate and start a PipelineWorker for the given entries and steps."""
         if self._worker and self._worker.isRunning():
             self._log_msg("Already running — cancel first.")
             return
@@ -878,22 +1172,25 @@ class MainWindow(QMainWindow):
         self._progress.setValue(done)
 
     def _on_step_done(self, image_name: str, step: str, status: str):
+        """Refresh the list item and (if selected) the preview when a step completes."""
         entry = next((e for e in self._entries if e.name == image_name), None)
         if entry:
             self._refresh_item(entry)
             if entry is self._current_entry:
                 self._update_step_statuses()
+                self._refresh_submit_btn()
                 if status == STATUS_DONE and (
                     self._preview_mode == "output"
                     or (step == "align" and self._preview_mode == "debug" and entry.debug_align)
                 ):
-                    # Auto-switch preview to latest output when step finishes
                     self._update_preview()
 
     def _on_worker_finished(self):
+        """Handle pipeline completion: hide progress bar and copy final outputs to the output dir."""
         self._progress.setVisible(False)
         self._cancel_btn.setEnabled(False)
         self._log_msg("── Done ──────────────────────────────────")
+        self._refresh_submit_btn()
         self._update_preview()
 
         # Copy final deglow outputs to the configured output dir
@@ -907,6 +1204,178 @@ class MainWindow(QMainWindow):
                 copied += 1
         if copied:
             self._log_msg(f"Copied {copied} final image(s) to {out_dir}")
+
+    # ── sortitoutsi download ───────────────────────────────────────────────────
+
+    def showEvent(self, event):
+        """Auto-fetch the queue on first show if no images are already loaded."""
+        super().showEvent(event)
+        if not self._entries and not self._download_worker:
+            self._auto_fetch_queue()
+
+    def _build_queue_url(self) -> str:
+        """Build the queue URL from the current filter widget values."""
+        status = self._status_combo.currentData()
+        sort = self._sort_combo.currentData()
+        by_id = self._submitter_edit.text().strip()
+        url = (
+            "https://sortitoutsi.net/graphics/submissions/1/queue"
+            f"?type=source&status={status}&sort={sort}&submit=1"
+        )
+        if by_id:
+            url += f"&submitted_by_id={by_id}"
+        return url
+
+    def _auto_fetch_queue(self):
+        """Fetch the queue with current filter settings and download to the output dir."""
+        if self._download_worker and self._download_worker.isRunning():
+            self._log_msg("Download already in progress.")
+            return
+        out_dir = Path(self._output_edit.text())
+        cookie_str = self._cookie_edit.text().strip()
+        queue_url = self._build_queue_url()
+        self._log_msg("\n── Fetching queue ──────────────────")
+        self._log_msg(f"  {queue_url}")
+        self._download_worker = DownloadWorker(queue_url, out_dir, cookie_str=cookie_str)
+        self._download_worker.log.connect(self._log_msg)
+        self._download_worker.progress.connect(self._on_progress)
+        self._download_worker.finished.connect(self._on_download_finished)
+        self._progress.setVisible(True)
+        self._progress.setRange(0, 0)
+        self._download_worker.start()
+
+    def _show_download_dialog(self):
+        """Open a dialog to download from a specific collection URL."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Download from sortitoutsi Collection")
+        dlg.setMinimumWidth(520)
+        layout = QVBoxLayout(dlg)
+
+        layout.addWidget(QLabel("Collection URL:"))
+        url_edit = QLineEdit(self._last_collection_url)
+        url_edit.setPlaceholderText(
+            "https://sortitoutsi.net/graphics/submissions/collection/…"
+        )
+        layout.addWidget(url_edit)
+
+        layout.addWidget(QLabel("Download to:"))
+        out_row = QHBoxLayout()
+        out_edit = QLineEdit(self._output_edit.text())
+        out_row.addWidget(out_edit)
+        browse_btn = QPushButton("…")
+        browse_btn.setFixedWidth(30)
+
+        def _browse():
+            d = QFileDialog.getExistingDirectory(dlg, "Select Download Folder", out_edit.text())
+            if d:
+                out_edit.setText(d)
+
+        browse_btn.clicked.connect(_browse)
+        out_row.addWidget(browse_btn)
+        layout.addLayout(out_row)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Download")
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        collection_url = url_edit.text().strip()
+        out_dir = Path(out_edit.text().strip())
+        if not collection_url:
+            self._log_msg("Download: no collection URL entered.")
+            return
+
+        self._last_collection_url = collection_url
+        self._log_msg("\n── Downloading collection ──────────────────")
+        self._log_msg(f"  {collection_url}")
+
+        cookie_str = self._cookie_edit.text().strip()
+        self._download_worker = DownloadWorker(collection_url, out_dir, cookie_str=cookie_str)
+        self._download_worker.log.connect(self._log_msg)
+        self._download_worker.progress.connect(self._on_progress)
+        self._download_worker.finished.connect(self._on_download_finished)
+
+        self._progress.setVisible(True)
+        self._progress.setRange(0, 0)  # indeterminate until we know the count
+        self._download_worker.start()
+
+    def _on_download_finished(self, count: int, out_dir_str: str):
+        self._progress.setVisible(False)
+        if count > 0:
+            self._log_msg(f"  Downloaded {count} image(s) to {out_dir_str}")
+            out_dir = Path(out_dir_str)
+            for p in sorted(out_dir.iterdir()):
+                if p.suffix.lower() in SUPPORTED_EXTS:
+                    self._add_entry(p)
+            self._refresh_list()
+            self._log_msg(f"  Loaded {count} image(s) into the image list.")
+        else:
+            self._log_msg("  No images downloaded.")
+
+    # ── sortitoutsi submit ─────────────────────────────────────────────────────
+
+    def _refresh_submit_btn(self):
+        """Enable the submit button when all conditions are met."""
+        entry = self._current_entry
+        if entry is None:
+            self._submit_btn.setEnabled(False)
+            return
+        center_done = entry.statuses.get("center") == STATUS_DONE
+        has_output = bool(entry.outputs.get("center") or entry.outputs.get("deglow"))
+        has_meta = load_metadata(entry.original) is not None
+        has_cookie = bool(self._cookie_edit.text().strip())
+        self._submit_btn.setEnabled(center_done and has_output and has_meta and has_cookie)
+
+    def _submit_current(self):
+        """Validate prerequisites and start a SubmitWorker for the current image.
+
+        Requires: center step done, a valid output file, a ``.sitsi.json``
+        sidecar, and a non-empty session cookie.
+        """
+        entry = self._current_entry
+        if entry is None:
+            return
+        image_path = entry.outputs.get("center") or entry.outputs.get("deglow")
+        if image_path is None or not image_path.exists():
+            self._log_msg("Submit: no output image found.")
+            return
+        meta = load_metadata(entry.original)
+        if meta is None:
+            self._log_msg("Submit: no sortitoutsi metadata (.sitsi.json) found for this image.")
+            return
+        cookie_str = self._cookie_edit.text().strip()
+        if not cookie_str:
+            self._log_msg("Submit: enter your session cookie in the Cookie field first.")
+            return
+        try:
+            validate_cookie_string(cookie_str)
+        except ValidationError as e:
+            self._log_msg(f"Submit: invalid cookie — {e}")
+            return
+
+        submission_id = meta["submission_id"]
+        self._log_msg(
+            f"\n── Submitting to sortitoutsi (submission {submission_id}) ──"
+        )
+        self._submit_btn.setEnabled(False)
+
+        self._submit_worker = SubmitWorker(image_path, submission_id, cookie_str)
+        self._submit_worker.log.connect(self._log_msg)
+        self._submit_worker.finished.connect(self._on_submit_finished)
+        self._submit_worker.start()
+
+    def _on_submit_finished(self, ok: bool, message: str):
+        if ok:
+            self._log_msg(f"  ✓ {message}")
+        else:
+            self._log_msg(f"  ✗ {message}")
+        self._refresh_submit_btn()
 
     # ── logging ────────────────────────────────────────────────────────────────
 
