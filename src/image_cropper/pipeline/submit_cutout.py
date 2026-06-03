@@ -47,8 +47,17 @@ def load_metadata(image_path: Path) -> SubmissionMeta | None:
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                return SubmissionMeta(**{k: data[k] for k in SubmissionMeta.__annotations__ if k in data})  # type: ignore[misc]
-            except Exception:
+                meta: SubmissionMeta = {
+                    "submission_id": int(data["submission_id"]),
+                    "person_id": data.get("person_id"),
+                    "alt": str(data["alt"]),
+                    "status": str(data["status"]),
+                    "image_type": str(data["image_type"]),
+                    "collection_url": str(data["collection_url"]),
+                    "downloaded_at": str(data["downloaded_at"]),
+                }
+                return meta
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 return None
     return None
 
