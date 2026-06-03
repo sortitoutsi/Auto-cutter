@@ -48,7 +48,7 @@ def load_metadata(image_path: Path) -> SubmissionMeta | None:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 return SubmissionMeta(**{k: data[k] for k in SubmissionMeta.__annotations__ if k in data})  # type: ignore[misc]
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 return None
     return None
 
@@ -90,7 +90,7 @@ def submit_cutout(
     try:
         form_resp = session.get(form_url, timeout=30)
         form_resp.raise_for_status()
-    except Exception as e:
+    except requests.RequestException as e:
         return SubmitResult(ok=False, submission_url=None, message=f"could not fetch form: {e}")
 
     soup = BeautifulSoup(form_resp.text, "html.parser")
@@ -134,7 +134,7 @@ def submit_cutout(
             # response_to_id goes as a regular field too
             data = {**hidden_fields, "response_to_id": str(submission_id)}
             post_resp = session.post(post_url, data=data, files=files, timeout=60)
-    except Exception as e:
+    except (requests.RequestException, OSError) as e:
         return SubmitResult(ok=False, submission_url=None, message=f"upload failed: {e}")
 
     # --- Step 3: determine success ---

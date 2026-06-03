@@ -387,7 +387,7 @@ def download_images(
                 print(f"    → {sidecar.name}")
 
             ok += 1
-        except Exception as e:
+        except (requests.RequestException, OSError) as e:
             print(f"    ERROR: {e}", file=sys.stderr)
         time.sleep(0.2)
 
