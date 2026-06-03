@@ -62,20 +62,6 @@ def load_metadata(image_path: Path) -> SubmissionMeta | None:
     return None
 
 
-def _find_sidecar(image_path: Path) -> Path | None:
-    """Search for a .sitsi.json sidecar, including stem-prefix matches."""
-    stem = image_path.stem
-    # strip common pipeline suffixes
-    for suffix in ("_final", "_dg", "_centered"):
-        stem = stem.removesuffix(suffix)
-
-    for parent in [image_path.parent] + list(image_path.parents):
-        candidate = parent / (stem + SIDECAR_SUFFIX)
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def submit_cutout(
     session: requests.Session,
     image_path: Path,
