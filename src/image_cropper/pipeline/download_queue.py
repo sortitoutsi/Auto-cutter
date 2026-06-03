@@ -269,7 +269,7 @@ def collect_collection_entries(
                 submission_id = _parse_submission_id_from_url(str(href))
                 if submission_id is None:
                     link = row.find("a", href=re.compile(r"/submissions/\d+"))
-                    if link:
+                    if isinstance(link, Tag):
                         submission_id = _parse_submission_id_from_url(str(link["href"]))
             if submission_id is None:
                 continue
@@ -287,12 +287,12 @@ def collect_collection_entries(
             # --- person ID ---
             person_id: int | None = None
             person_link = row.find("a", href=re.compile(r"/browse/\d+/\d+"))
-            if person_link:
+            if isinstance(person_link, Tag):
                 person_id = _parse_person_id_from_url(str(person_link["href"]))
 
             # --- source image ---
             img = row.find("img")
-            if img is None:
+            if not isinstance(img, Tag):
                 continue
             src = str(img.get("src", ""))
             alt = str(img.get("alt", f"submission_{submission_id}")).strip()

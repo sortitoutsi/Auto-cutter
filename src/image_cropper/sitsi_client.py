@@ -10,7 +10,7 @@ import re
 from urllib.parse import urlparse
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from image_cropper.errors import ValidationError
 
@@ -93,11 +93,11 @@ def get_csrf_token(session: requests.Session, page_url: str) -> str:
     soup = BeautifulSoup(resp.text, "html.parser")
 
     meta = soup.find("meta", attrs={"name": "csrf-token"})
-    if meta and meta.get("content"):
+    if isinstance(meta, Tag) and meta.get("content"):
         return str(meta["content"])
 
     inp = soup.find("input", attrs={"name": "_token"})
-    if inp and inp.get("value"):
+    if isinstance(inp, Tag) and inp.get("value"):
         return str(inp["value"])
 
     raise ValidationError(f"could not find CSRF token on {page_url}")
@@ -109,7 +109,7 @@ def get_hidden_form_fields(soup: BeautifulSoup, form_selector: str = "form") -> 
     if not form:
         return {}
     return {
-        inp["name"]: inp.get("value", "")
+        str(inp["name"]): str(inp.get("value", ""))
         for inp in form.find_all("input", attrs={"type": "hidden"})
-        if inp.get("name")
+        if isinstance(inp, Tag) and inp.get("name")
     }

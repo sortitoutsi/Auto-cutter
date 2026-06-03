@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from image_cropper.errors import ImageCropperError, ValidationError
 from image_cropper.sitsi_client import (
@@ -91,17 +91,23 @@ def submit_cutout(
     soup = BeautifulSoup(form_resp.text, "html.parser")
 
     # Find the form that contains a file input (the submission form)
-    form = None
+    form: Tag | None = None
     for f in soup.find_all("form"):
+        if not isinstance(f, Tag):
+            continue
         if f.find("input", attrs={"type": "file"}):
             form = f
             break
     if form is None:
-        form = soup.find("form")
+        found = soup.find("form")
+        if isinstance(found, Tag):
+            form = found
 
     hidden_fields: dict[str, str] = {}
-    if form:
+    if form is not None:
         for inp in form.find_all("input", attrs={"type": "hidden"}):
+            if not isinstance(inp, Tag):
+                continue
             name = inp.get("name")
             value = inp.get("value", "")
             if name:
@@ -109,14 +115,14 @@ def submit_cutout(
 
     # Detect the file input field name (commonly "file", "image", "cutout")
     file_field_name = "file"
-    if form:
+    if form is not None:
         file_inp = form.find("input", attrs={"type": "file"})
-        if file_inp and file_inp.get("name"):
+        if isinstance(file_inp, Tag) and file_inp.get("name"):
             file_field_name = str(file_inp["name"])
 
     # Detect the form action URL
     post_url = SUBMIT_BASE_URL
-    if form and form.get("action"):
+    if form is not None and form.get("action"):
         action = str(form["action"])
         post_url = action if action.startswith("http") else BASE_URL + action
 
