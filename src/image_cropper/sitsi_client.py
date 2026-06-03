@@ -36,19 +36,8 @@ def validate_cookie_string(raw: str) -> str:
     return raw
 
 
-def validate_image_url(url: str) -> str:
+def validate_url(url: str) -> str:
     """Reject URLs not on the sortitoutsi.net domain (SSRF guard)."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValidationError(f"refusing non-HTTP(S) URL: {url}")
-    host = (parsed.hostname or "").lower()
-    if host not in ALLOWED_HOSTS:
-        raise ValidationError(f"refusing URL outside sortitoutsi.net: {url}")
-    return url
-
-
-def validate_sitsi_url(url: str) -> str:
-    """Like validate_image_url but for any sortitoutsi page URL."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValidationError(f"refusing non-HTTP(S) URL: {url}")
@@ -87,7 +76,7 @@ def get_csrf_token(session: requests.Session, page_url: str) -> str:
 
     Raises :class:`ValidationError` if no token is found.
     """
-    validate_sitsi_url(page_url)
+    validate_url(page_url)
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")

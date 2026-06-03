@@ -44,7 +44,7 @@ from image_cropper.sitsi_client import (
     BASE_URL,
     get_session,
     validate_cookie_string,
-    validate_image_url,
+    validate_url,
 )
 from image_cropper.types import QueueEntry, SubmissionMeta
 
@@ -144,7 +144,7 @@ def collect_image_entries(
                 continue
 
             try:
-                validate_image_url(img_url)
+                validate_url(img_url)
             except ValidationError as e:
                 print(f"  skip: {e}", file=sys.stderr)
                 continue
@@ -302,7 +302,7 @@ def collect_collection_entries(
             full_url = src if src.startswith("http") else BASE_URL + src
             full_url = strip_size_params(full_url)
             try:
-                validate_image_url(full_url)
+                validate_url(full_url)
             except ValidationError as e:
                 print(f"  skip: {e}", file=sys.stderr)
                 continue
@@ -360,7 +360,7 @@ def download_images(
         url = entry["url"]
         alt = entry["alt"]
         try:
-            validate_image_url(url)
+            validate_url(url)
         except ValidationError as e:
             print(f"    SKIP: {e}", file=sys.stderr)
             continue

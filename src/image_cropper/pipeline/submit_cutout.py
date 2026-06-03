@@ -25,7 +25,7 @@ from image_cropper.sitsi_client import (
     BASE_URL,
     get_session,
     validate_cookie_string,
-    validate_sitsi_url,
+    validate_url,
 )
 from image_cropper.types import SubmissionMeta, SubmitResult
 
@@ -84,7 +84,7 @@ def submit_cutout(
         return SubmitResult(ok=False, submission_url=None, message=f"file not found: {image_path}")
 
     form_url = f"{SUBMIT_BASE_URL}?response_to_id={submission_id}"
-    validate_sitsi_url(form_url)
+    validate_url(form_url)
 
     # --- Step 1: fetch the form ---
     try:
@@ -125,7 +125,7 @@ def submit_cutout(
         action = str(form["action"])
         post_url = action if action.startswith("http") else BASE_URL + action
 
-    validate_sitsi_url(post_url)
+    validate_url(post_url)
 
     # --- Step 2: POST ---
     try:
