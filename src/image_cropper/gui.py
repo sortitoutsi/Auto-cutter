@@ -63,7 +63,7 @@ from image_cropper.pipeline.download_queue import (
     safe_filename,
 )
 from image_cropper.pipeline.submit_cutout import load_metadata, submit_cutout
-from image_cropper.sitsi_client import get_session, validate_cookie_string, validate_image_url
+from image_cropper.sitsi_client import get_session, validate_cookie_string, validate_url
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 PYTHON = sys.executable  # GUI must be launched from the same venv as the scripts
@@ -451,7 +451,7 @@ class DownloadWorker(QThread):
                 url = entry["url"]
                 alt = entry["alt"]
                 try:
-                    validate_image_url(url)
+                    validate_url(url)
                     resp = session.get(url, timeout=60, stream=True)
                     resp.raise_for_status()
                     ext = guess_extension(url, resp.headers.get("Content-Type", ""))
