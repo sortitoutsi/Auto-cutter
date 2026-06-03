@@ -126,6 +126,26 @@ class QueueEntry(TypedDict):
     alt: str
 
 
+class SubmissionMeta(TypedDict):
+    """Metadata scraped from a sortitoutsi.net collection page, saved as a sidecar."""
+
+    submission_id: int
+    person_id: int | None
+    alt: str
+    status: str       # "pending" | "in_progress" | "completed" | "rejected"
+    image_type: str   # "source" | "game_ready"
+    collection_url: str
+    downloaded_at: str  # ISO-8601
+
+
+class SubmitResult(TypedDict):
+    """Result of posting a cutout back to sortitoutsi.net."""
+
+    ok: bool
+    submission_url: str | None  # URL of the created submission if successful
+    message: str
+
+
 __all__ = [
     "Point2D",
     "EyeDetection",
@@ -134,4 +154,6 @@ __all__ = [
     "CropBox",
     "MetricsDict",
     "QueueEntry",
+    "SubmissionMeta",
+    "SubmitResult",
 ]
